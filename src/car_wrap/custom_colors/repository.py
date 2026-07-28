@@ -313,3 +313,55 @@ class CustomColorRepository:
         version.retain_count -= 1
         await session.flush()
         return version.retain_count
+
+    async def cleanup_key_for_version(
+        self,
+        session: AsyncSession,
+        *,
+        version_id: UUID,
+    ) -> str | None:
+        row = (
+            await session.execute(
+                select(
+                    CustomColor.status,
+                    CustomColorVersion.object_key,
+                    CustomColorVersion.retain_count,
+                )
+                .join(
+                    CustomColor,
+                    CustomColor.id == CustomColorVersion.custom_color_id,
+                )
+                .where(CustomColorVersion.id == version_id)
+            )
+        ).one_or_none()
+        if row is None:
+            raise LookupError("custom color version not found")
+        status, object_key, retain_count = row
+        if status == ColorStatus.DELETED.value and retain_count == 0:
+            return str(object_key)
+        return None
+
+    async def cleanup_key_for_color(
+        self,
+        session: AsyncSession,
+        *,
+        color_id: UUID,
+    ) -> str | None:
+        version_id = await session.scalar(
+            select(CustomColorVersion.id)
+            .join(
+                CustomColor,
+                CustomColor.id == CustomColorVersion.custom_color_id,
+            )
+            .where(
+                CustomColor.id == color_id,
+                CustomColor.status == ColorStatus.DELETED.value,
+                CustomColor.current_version == CustomColorVersion.version,
+            )
+        )
+        if version_id is None:
+            raise LookupError("custom color version not found")
+        return await self.cleanup_key_for_version(
+            session,
+            version_id=version_id,
+        )

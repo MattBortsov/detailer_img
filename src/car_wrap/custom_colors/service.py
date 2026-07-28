@@ -5,6 +5,9 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from car_wrap.custom_colors.media import CanonicalImage
 from car_wrap.custom_colors.moderation import (
@@ -12,16 +15,10 @@ from car_wrap.custom_colors.moderation import (
     ModerationResult,
     normalize_display_name,
 )
-from car_wrap.custom_colors.repository import VersionInput
+from car_wrap.custom_colors.repository import ColorStatus, VersionInput
 from car_wrap.custom_colors.storage import StoredObject
 
 _IDEMPOTENCY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
-
-
-class Session(Protocol):
-    async def commit(self) -> None: ...
-
-    async def rollback(self) -> None: ...
 
 
 class Storage(Protocol):
@@ -31,16 +28,57 @@ class Storage(Protocol):
 
 
 class Repository(Protocol):
-    async def create(self, session: Any, **kwargs: Any) -> Any: ...
+    async def create(
+        self,
+        session: AsyncSession,
+        *,
+        owner_id: int,
+        display_name: str,
+        version: VersionInput,
+    ) -> Any: ...
 
     async def apply_moderation(
         self,
-        session: Any,
+        session: AsyncSession,
         *,
-        color_id: Any,
+        color_id: UUID,
         idempotency_key: str,
         result: ModerationResult,
         provider_model: str,
+    ) -> Any: ...
+
+    async def release(
+        self,
+        session: AsyncSession,
+        *,
+        version_id: UUID,
+    ) -> int: ...
+
+    async def cleanup_key_for_version(
+        self,
+        session: AsyncSession,
+        *,
+        version_id: UUID,
+    ) -> str | None: ...
+
+    async def cleanup_key_for_color(
+        self,
+        session: AsyncSession,
+        *,
+        color_id: UUID,
+    ) -> str | None: ...
+
+    async def transition(
+        self,
+        session: AsyncSession,
+        *,
+        color_id: UUID,
+        target: ColorStatus,
+        owner_id: int | None = None,
+        reason_code: str | None = None,
+        admin_actor_id: int | None = None,
+        admin_action: str | None = None,
+        admin_reason: str | None = None,
     ) -> Any: ...
 
 
@@ -66,7 +104,7 @@ class CustomColorService:
 
     async def create(
         self,
-        session: Session,
+        session: AsyncSession,
         *,
         owner_id: int,
         display_name: str,
@@ -81,10 +119,7 @@ class CustomColorService:
         normalized_name = normalize_display_name(display_name)
         canonical = self._normalize(upload, declared_mime)
         stored = self._storage.put(canonical.data)
-        if (
-            stored.sha256 != canonical.sha256
-            or stored.byte_size != len(canonical.data)
-        ):
+        if stored.sha256 != canonical.sha256 or stored.byte_size != len(canonical.data):
             self._storage.delete(stored.key)
             raise ValueError("private storage integrity metadata mismatch")
         try:
@@ -126,4 +161,65 @@ class CustomColorService:
         except Exception:
             await session.rollback()
             raise
+        return color
+
+    async def release(
+        self,
+        session: AsyncSession,
+        *,
+        version_id: UUID,
+    ) -> int:
+        """Release an accepted reference and remove a deleted unretained object."""
+
+        try:
+            remaining = await self._repository.release(
+                session,
+                version_id=version_id,
+            )
+            cleanup_key = await self._repository.cleanup_key_for_version(
+                session,
+                version_id=version_id,
+            )
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        if remaining == 0 and cleanup_key is not None:
+            self._storage.delete(cleanup_key)
+        return remaining
+
+    async def delete(
+        self,
+        session: AsyncSession,
+        *,
+        color_id: UUID,
+        owner_id: int | None = None,
+        admin_actor_id: int | None = None,
+        admin_reason: str | None = None,
+    ) -> Any:
+        """Tombstone a color, then remove its unretained private object."""
+
+        try:
+            color = await self._repository.transition(
+                session,
+                color_id=color_id,
+                target=ColorStatus.DELETED,
+                owner_id=owner_id,
+                reason_code=(
+                    "owner_deleted" if owner_id is not None else "admin_delete"
+                ),
+                admin_actor_id=admin_actor_id,
+                admin_action=("delete" if admin_actor_id is not None else None),
+                admin_reason=admin_reason,
+            )
+            cleanup_key = await self._repository.cleanup_key_for_color(
+                session,
+                color_id=color_id,
+            )
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        if cleanup_key is not None:
+            self._storage.delete(cleanup_key)
         return color

@@ -16,6 +16,7 @@ from car_wrap.api.dependencies import (
     require_mini_app_session,
 )
 from car_wrap.config import AppSettings
+from car_wrap.custom_colors.repository import QuotaExceededError
 
 NOW = datetime(2026, 7, 28, 12, tzinfo=UTC)
 
@@ -67,6 +68,12 @@ class Service:
         del session
         self.calls.append(kwargs)
         return Created(uuid4(), "Bronze Satin", "needs_review", 1)
+
+
+class QuotaService(Service):
+    async def create(self, session: object, **kwargs: Any) -> Created:
+        del session, kwargs
+        raise QuotaExceededError("private quota detail")
 
 
 def app_with(service: Service, *, authenticated: bool = True) -> Any:
@@ -158,6 +165,26 @@ async def test_creation_requires_authenticated_session() -> None:
         )
     assert response.status_code == 401
     assert not service.calls
+
+
+@pytest.mark.asyncio
+async def test_creation_returns_actionable_concealed_quota_error() -> None:
+    async with AsyncClient(
+        transport=ASGITransport(app=app_with(QuotaService())),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/custom-colors",
+            headers={"Idempotency-Key": "upload-1"},
+            files={
+                "name": (None, "Bronze"),
+                "image": ("sample.png", b"bytes", "image/png"),
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Custom color quota reached"}
+    assert "private quota detail" not in response.text
 
 
 @pytest.mark.asyncio

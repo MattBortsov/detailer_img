@@ -108,11 +108,9 @@ async def test_upload_select_generate_retain_delete_release_lifecycle(
         custom_color_storage=storage,
         custom_color_repository=repository,
     )
-    app.dependency_overrides[require_mini_app_session] = lambda: (
-        CurrentMiniAppSession(
-            telegram_user_id=actor["id"],
-            expires_at=NOW + timedelta(minutes=15),
-        )
+    app.dependency_overrides[require_mini_app_session] = lambda: CurrentMiniAppSession(
+        telegram_user_id=actor["id"],
+        expires_at=NOW + timedelta(minutes=15),
     )
     async with sessions() as session:
         session.add(
@@ -196,12 +194,10 @@ async def test_upload_select_generate_retain_delete_release_lifecycle(
     assert "Bronze Satin" not in provider_payload["prompt"]
     assert intent.object_key not in json.dumps(provider_payload)
     assert original not in list(
-        path.read_bytes()
-        for path in (tmp_path / "private-colors").rglob("*.png")
+        path.read_bytes() for path in (tmp_path / "private-colors").rglob("*.png")
     )
     assert vehicle not in list(
-        path.read_bytes()
-        for path in (tmp_path / "private-colors").rglob("*.png")
+        path.read_bytes() for path in (tmp_path / "private-colors").rglob("*.png")
     )
 
     actor["id"] = 1001
@@ -232,3 +228,33 @@ async def test_upload_select_generate_retain_delete_release_lifecycle(
     assert remaining == 0
     with pytest.raises(FileNotFoundError):
         storage.read(intent.object_key, intent.sha256)
+
+    actor["id"] = 1001
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://testserver",
+    ) as client:
+        created_unretained = await client.post(
+            "/api/v1/custom-colors",
+            headers={"Idempotency-Key": "e2e-upload-2"},
+            files={
+                "name": (None, "Copper Satin"),
+                "image": ("sample.png", original, "image/png"),
+            },
+        )
+        assert created_unretained.status_code == 202
+        unretained_id = UUID(created_unretained.json()["id"])
+        async with sessions() as session:
+            unretained = await session.scalar(
+                select(CustomColorVersion).where(
+                    CustomColorVersion.custom_color_id == unretained_id
+                )
+            )
+            assert unretained is not None
+            unretained_key = unretained.object_key
+            unretained_digest = unretained.sha256
+        assert storage.read(unretained_key, unretained_digest)
+        removed = await client.delete(f"/api/v1/custom-colors/{unretained_id}")
+        assert removed.status_code == 204
+    with pytest.raises(FileNotFoundError):
+        storage.read(unretained_key, unretained_digest)

@@ -21,7 +21,12 @@ from car_wrap.api.dependencies import (
     require_mini_app_session,
 )
 from car_wrap.api.schemas import CustomColorMutationIn
-from car_wrap.custom_colors.repository import ColorStatus, InvalidTransitionError
+from car_wrap.custom_colors.media import MediaValidationError
+from car_wrap.custom_colors.repository import (
+    ColorStatus,
+    InvalidTransitionError,
+    QuotaExceededError,
+)
 from car_wrap.db.models import CustomColor, CustomColorVersion
 from car_wrap.palette import custom_selection_id
 
@@ -88,14 +93,25 @@ async def create_custom_color(
     if key is None:
         raise HTTPException(status_code=400, detail="Idempotency key is required")
     upload = await parse_custom_color_upload(request)
-    color = await service.create(
-        session,
-        owner_id=current.telegram_user_id,
-        display_name=upload.name,
-        upload=upload.image,
-        declared_mime=upload.mime_type,
-        idempotency_key=key,
-    )
+    try:
+        color = await service.create(
+            session,
+            owner_id=current.telegram_user_id,
+            display_name=upload.name,
+            upload=upload.image,
+            declared_mime=upload.mime_type,
+            idempotency_key=key,
+        )
+    except QuotaExceededError:
+        raise HTTPException(
+            status_code=409,
+            detail="Custom color quota reached",
+        ) from None
+    except (MediaValidationError, ValueError):
+        raise HTTPException(
+            status_code=422,
+            detail="Image or color name is invalid",
+        ) from None
     return JSONResponse(
         status_code=202,
         content={
@@ -274,20 +290,17 @@ async def delete_owner(
     current: CurrentSession,
     session: DatabaseSession,
 ) -> Response:
-    repository = getattr(request.app.state, "custom_color_repository", None)
-    if repository is None:
+    service = getattr(request.app.state, "custom_color_service", None)
+    if service is None:
         raise HTTPException(status_code=503, detail="Service unavailable")
     try:
-        await repository.transition(
+        await service.delete(
             session,
             color_id=color_id,
-            target=ColorStatus.DELETED,
             owner_id=current.telegram_user_id,
-            reason_code="owner_deleted",
         )
     except (LookupError, InvalidTransitionError):
         raise _not_found() from None
-    await session.commit()
     return Response(status_code=204)
 
 
@@ -365,6 +378,20 @@ async def admin_action(
     }
     if action not in mapping:
         raise _not_found()
+    if action == "delete":
+        service = getattr(request.app.state, "custom_color_service", None)
+        if service is None:
+            raise HTTPException(status_code=503, detail="Service unavailable")
+        try:
+            color = await service.delete(
+                session,
+                color_id=color_id,
+                admin_actor_id=current.telegram_user_id,
+                admin_reason=mutation.reason,
+            )
+        except (LookupError, InvalidTransitionError):
+            raise _not_found() from None
+        return {"id": str(color.id), "status": color.status}
     repository = getattr(request.app.state, "custom_color_repository", None)
     if repository is None:
         raise HTTPException(status_code=503, detail="Service unavailable")

@@ -212,19 +212,14 @@ async def moderate_reference(
         ) as response:
             if response.status_code != 200:
                 return _review("provider_http_error")
-            content_type = response.headers.get("content-type", "").split(";", 1)[
-                0
-            ]
+            content_type = response.headers.get("content-type", "").split(";", 1)[0]
             content_length = response.headers.get("content-length")
-            if (
-                content_type != "application/json"
-                or (
-                    content_length is not None
-                    and (
-                        not content_length.isascii()
-                        or not content_length.isdecimal()
-                        or int(content_length) > _MAX_RESPONSE_BYTES
-                    )
+            if content_type != "application/json" or (
+                content_length is not None
+                and (
+                    not content_length.isascii()
+                    or not content_length.isdecimal()
+                    or int(content_length) > _MAX_RESPONSE_BYTES
                 )
             ):
                 return _review("invalid_provider_response")
