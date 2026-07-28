@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from car_wrap.custom_colors.moderation import ModerationResult
+from car_wrap.custom_colors.moderation import ModerationResult, normalize_display_name
 from car_wrap.db.models import (
     AdminAuditEvent,
     CustomColor,
@@ -47,10 +47,19 @@ class VersionInput:
 
 _TRANSITIONS: dict[ColorStatus, frozenset[ColorStatus]] = {
     ColorStatus.PENDING: frozenset(
-        {ColorStatus.NEEDS_REVIEW, ColorStatus.REJECTED, ColorStatus.APPROVED}
+        {
+            ColorStatus.NEEDS_REVIEW,
+            ColorStatus.REJECTED,
+            ColorStatus.APPROVED,
+            ColorStatus.DELETED,
+        }
     ),
-    ColorStatus.NEEDS_REVIEW: frozenset({ColorStatus.REJECTED, ColorStatus.APPROVED}),
-    ColorStatus.REJECTED: frozenset({ColorStatus.NEEDS_REVIEW, ColorStatus.DELETED}),
+    ColorStatus.NEEDS_REVIEW: frozenset(
+        {ColorStatus.REJECTED, ColorStatus.APPROVED, ColorStatus.DELETED}
+    ),
+    ColorStatus.REJECTED: frozenset(
+        {ColorStatus.NEEDS_REVIEW, ColorStatus.APPROVED, ColorStatus.DELETED}
+    ),
     ColorStatus.APPROVED: frozenset({ColorStatus.HIDDEN, ColorStatus.DELETED}),
     ColorStatus.HIDDEN: frozenset({ColorStatus.APPROVED, ColorStatus.DELETED}),
     ColorStatus.DELETED: frozenset(),
@@ -112,17 +121,21 @@ class CustomColorRepository:
         *,
         color_id: UUID,
         target: ColorStatus,
+        owner_id: int | None = None,
         reason_code: str | None = None,
         admin_actor_id: int | None = None,
         admin_action: str | None = None,
         admin_reason: str | None = None,
     ) -> CustomColor:
-        color = await session.scalar(
-            select(CustomColor).where(CustomColor.id == color_id).with_for_update()
-        )
+        statement = select(CustomColor).where(CustomColor.id == color_id)
+        if owner_id is not None:
+            statement = statement.where(CustomColor.telegram_user_id == owner_id)
+        color = await session.scalar(statement.with_for_update())
         if color is None:
             raise LookupError("custom color not found")
         current = ColorStatus(color.status)
+        if admin_action == "restore" and current is not ColorStatus.HIDDEN:
+            raise InvalidTransitionError("only hidden colors can be restored")
         if target not in _TRANSITIONS[current]:
             raise InvalidTransitionError(f"{current} cannot transition to {target}")
         now = datetime.now(UTC)
@@ -142,6 +155,39 @@ class CustomColorRepository:
                     actor_telegram_user_id=admin_actor_id,
                     custom_color_id=color.id,
                     action=admin_action,
+                    reason=admin_reason,
+                )
+            )
+        await session.flush()
+        return color
+
+    async def rename(
+        self,
+        session: AsyncSession,
+        *,
+        color_id: UUID,
+        display_name: str,
+        owner_id: int | None = None,
+        admin_actor_id: int | None = None,
+        admin_reason: str | None = None,
+    ) -> CustomColor:
+        statement = select(CustomColor).where(
+            CustomColor.id == color_id,
+            CustomColor.status != ColorStatus.DELETED.value,
+        )
+        if owner_id is not None:
+            statement = statement.where(CustomColor.telegram_user_id == owner_id)
+        color = await session.scalar(statement.with_for_update())
+        if color is None:
+            raise LookupError("custom color not found")
+        color.display_name = normalize_display_name(display_name)
+        color.updated_at = datetime.now(UTC)
+        if admin_actor_id is not None:
+            session.add(
+                AdminAuditEvent(
+                    actor_telegram_user_id=admin_actor_id,
+                    custom_color_id=color.id,
+                    action="rename",
                     reason=admin_reason,
                 )
             )

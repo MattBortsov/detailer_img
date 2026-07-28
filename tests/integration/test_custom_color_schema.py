@@ -15,11 +15,18 @@ from car_wrap.custom_colors.moderation import (
     ModerationResult,
 )
 from car_wrap.custom_colors.repository import (
+    ColorStatus,
     CustomColorRepository,
+    InvalidTransitionError,
     QuotaExceededError,
     VersionInput,
 )
-from car_wrap.db.models import CustomColor, CustomColorVersion, ModerationAttempt
+from car_wrap.db.models import (
+    AdminAuditEvent,
+    CustomColor,
+    CustomColorVersion,
+    ModerationAttempt,
+)
 
 pytestmark = pytest.mark.postgresql
 
@@ -138,3 +145,87 @@ async def test_moderation_application_is_idempotent(
     assert stored_color is not None
     assert stored_color.status == "approved"
     assert attempt_count == 1
+
+
+@pytest.mark.asyncio
+async def test_owner_guards_and_admin_mutations_are_centralized(
+    database_engine: AsyncEngine,
+) -> None:
+    sessions = async_sessionmaker(database_engine, expire_on_commit=False)
+    repository = CustomColorRepository(quota=20)
+    async with sessions() as session:
+        color = await repository.create(
+            session,
+            owner_id=707,
+            display_name="Bronze",
+            version=version_input("aa/bb/" + "e" * 32 + ".png"),
+        )
+        await session.commit()
+
+    async with sessions() as session:
+        with pytest.raises(LookupError):
+            await repository.rename(
+                session,
+                color_id=color.id,
+                owner_id=999,
+                display_name="Stolen",
+            )
+        await session.rollback()
+
+    async with sessions() as session:
+        renamed = await repository.rename(
+            session,
+            color_id=color.id,
+            display_name="  Bronze   Satin  ",
+            admin_actor_id=1,
+            admin_reason="manual review",
+        )
+        approved = await repository.transition(
+            session,
+            color_id=color.id,
+            target=ColorStatus.APPROVED,
+            reason_code="admin_approve",
+            admin_actor_id=1,
+            admin_action="approve",
+        )
+        await session.commit()
+        events = list(
+            (
+                await session.execute(
+                    select(AdminAuditEvent).order_by(AdminAuditEvent.created_at)
+                )
+            ).scalars()
+        )
+
+    assert renamed.display_name == "Bronze Satin"
+    assert approved.status == "approved"
+    assert [event.action for event in events] == ["rename", "approve"]
+
+
+@pytest.mark.asyncio
+async def test_restore_only_accepts_hidden_colors(
+    database_engine: AsyncEngine,
+) -> None:
+    sessions = async_sessionmaker(database_engine, expire_on_commit=False)
+    repository = CustomColorRepository(quota=20)
+    async with sessions() as session:
+        color = await repository.create(
+            session,
+            owner_id=808,
+            display_name="Copper",
+            version=version_input("aa/bb/" + "f" * 32 + ".png"),
+        )
+        await repository.transition(
+            session,
+            color_id=color.id,
+            target=ColorStatus.REJECTED,
+            reason_code="unsafe",
+        )
+        with pytest.raises(InvalidTransitionError):
+            await repository.transition(
+                session,
+                color_id=color.id,
+                target=ColorStatus.APPROVED,
+                admin_actor_id=1,
+                admin_action="restore",
+            )
