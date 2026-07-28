@@ -84,8 +84,8 @@ def test_exact_safe_copy_and_external_assets() -> None:
         if tag == "script"
     ]
     assert "https://telegram.org/js/telegram-web-app.js" in scripts
-    assert "/app.js" in scripts
-    assert 'href="/app.css"' in source
+    assert "./app.js" in scripts
+    assert 'href="./app.css"' in source
 
 
 def test_prohibited_controls_and_phase3_ui_are_absent() -> None:
