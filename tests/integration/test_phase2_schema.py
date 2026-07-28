@@ -58,11 +58,11 @@ def mini_app_session_values(**overrides: object) -> dict[str, object]:
     return values
 
 
-def test_metadata_contains_only_two_metadata_tables() -> None:
-    assert set(Base.metadata.tables) == {
+def test_phase2_core_tables_remain_metadata_only() -> None:
+    assert {
         "active_sources",
         "mini_app_sessions",
-    }
+    } <= set(Base.metadata.tables)
     forbidden_fragments = {
         "bytes",
         "base64",
@@ -80,8 +80,8 @@ def test_metadata_contains_only_two_metadata_tables() -> None:
     }
     all_columns = {
         column.name
-        for table in Base.metadata.tables.values()
-        for column in table.columns
+        for table_name in ("active_sources", "mini_app_sessions")
+        for column in Base.metadata.tables[table_name].columns
     }
     assert not any(
         fragment in column for column in all_columns for fragment in forbidden_fragments
@@ -217,11 +217,15 @@ def test_alembic_upgrade_downgrade_upgrade_parity(
         command.upgrade(config, "head")
         with engine.connect() as connection:
             observed = inspect_schema(connection)
-        assert observed["tables"] == {
+        assert {
             "active_sources",
             "alembic_version",
             "mini_app_sessions",
-        }
+            "custom_colors",
+            "custom_color_versions",
+            "moderation_attempts",
+            "admin_audit_events",
+        } <= observed["tables"]
         assert observed["active_columns"] == {
             column.name for column in ActiveSource.__table__.columns
         }

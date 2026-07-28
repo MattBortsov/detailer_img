@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Self
 from urllib.parse import urlsplit
 
@@ -22,6 +23,15 @@ _MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")
 _BOT_USERNAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{3,27}[Bb][Oo][Tt]$")
 _COOKIE_NAME_PATTERN = re.compile(r"^(?:__Host-)?[A-Za-z0-9_-]{1,64}$")
 _SUPPORTED_DOCUMENT_MIME_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
+_CUSTOM_COLOR_MIME_TYPES = frozenset(
+    {
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/heic",
+        "image/heif",
+    }
+)
 
 
 class AppSettings(BaseModel):
@@ -55,6 +65,36 @@ class AppSettings(BaseModel):
     min_side_px: int = Field(default=256, strict=True, gt=0)
     max_side_px: int = Field(default=4096, strict=True, gt=0)
     max_pixels: int = Field(default=16_000_000, strict=True, gt=0)
+    custom_color_storage_root: Path = Path("/var/lib/car-wrap/custom-colors")
+    custom_color_max_bytes: int = Field(
+        default=8 * 1024 * 1024,
+        strict=True,
+        gt=0,
+    )
+    custom_color_max_side_px: int = Field(default=8192, strict=True, gt=0)
+    custom_color_max_pixels: int = Field(default=20_000_000, strict=True, gt=0)
+    custom_color_max_frames: int = Field(default=1, strict=True, gt=0)
+    custom_color_output_long_edge_px: int = Field(
+        default=2048,
+        strict=True,
+        gt=0,
+    )
+    custom_color_decode_timeout_seconds: int = Field(
+        default=15,
+        strict=True,
+        gt=0,
+    )
+    custom_color_quota: int = Field(default=20, strict=True, gt=0, le=100)
+    custom_color_mime_allowlist: tuple[str, ...] = (
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/heic",
+        "image/heif",
+    )
+    clamav_socket_path: Path = Path("/run/clamav/clamd.ctl")
+    moderation_vision_model: str = "google/gemini-2.5-flash"
+    admin_telegram_user_ids: tuple[int, ...] = ()
 
     @field_validator("database_url")
     @classmethod
@@ -109,6 +149,41 @@ class AppSettings(BaseModel):
             raise ValueError("unsupported document MIME allowlist")
         return value
 
+    @field_validator("custom_color_mime_allowlist")
+    @classmethod
+    def validate_custom_color_mime_allowlist(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        if (
+            not value
+            or len(value) != len(set(value))
+            or any(item not in _CUSTOM_COLOR_MIME_TYPES for item in value)
+        ):
+            raise ValueError("unsupported custom color MIME allowlist")
+        return value
+
+    @field_validator("custom_color_storage_root", "clamav_socket_path")
+    @classmethod
+    def validate_absolute_private_path(cls, value: Path) -> Path:
+        if not value.is_absolute() or value == Path("/"):
+            raise ValueError("private media paths must be absolute and narrow")
+        return value
+
+    @field_validator("moderation_vision_model")
+    @classmethod
+    def validate_moderation_model(cls, value: str) -> str:
+        if not _MODEL_NAME_PATTERN.fullmatch(value):
+            raise ValueError("invalid moderation model name")
+        return value
+
+    @field_validator("admin_telegram_user_ids")
+    @classmethod
+    def validate_admin_ids(cls, value: tuple[int, ...]) -> tuple[int, ...]:
+        if len(value) != len(set(value)) or any(item <= 0 for item in value):
+            raise ValueError("administrator IDs must be unique positive integers")
+        return value
+
     @model_validator(mode="after")
     def validate_related_limits(self) -> Self:
         if self.auth_future_skew_seconds >= self.auth_max_age_seconds:
@@ -119,6 +194,10 @@ class AppSettings(BaseModel):
             raise ValueError("minimum side must not exceed maximum side")
         if self.max_pixels < self.min_side_px**2:
             raise ValueError("pixel limit contradicts minimum dimensions")
+        if self.custom_color_max_frames != 1:
+            raise ValueError("custom color references must be single-frame")
+        if self.custom_color_output_long_edge_px > self.custom_color_max_side_px:
+            raise ValueError("output edge must not exceed decode side limit")
         return self
 
     @classmethod
@@ -137,6 +216,9 @@ class AppSettings(BaseModel):
         }
         string_fields = {
             "SESSION_COOKIE_NAME": "session_cookie_name",
+            "CUSTOM_COLOR_STORAGE_ROOT": "custom_color_storage_root",
+            "CLAMAV_SOCKET_PATH": "clamav_socket_path",
+            "MODERATION_VISION_MODEL": "moderation_vision_model",
         }
         integer_fields = {
             "INIT_DATA_MAX_BYTES": "init_data_max_bytes",
@@ -147,6 +229,15 @@ class AppSettings(BaseModel):
             "MIN_SIDE_PX": "min_side_px",
             "MAX_SIDE_PX": "max_side_px",
             "MAX_PIXELS": "max_pixels",
+            "CUSTOM_COLOR_MAX_BYTES": "custom_color_max_bytes",
+            "CUSTOM_COLOR_MAX_SIDE_PX": "custom_color_max_side_px",
+            "CUSTOM_COLOR_MAX_PIXELS": "custom_color_max_pixels",
+            "CUSTOM_COLOR_MAX_FRAMES": "custom_color_max_frames",
+            "CUSTOM_COLOR_OUTPUT_LONG_EDGE_PX": "custom_color_output_long_edge_px",
+            "CUSTOM_COLOR_DECODE_TIMEOUT_SECONDS": (
+                "custom_color_decode_timeout_seconds"
+            ),
+            "CUSTOM_COLOR_QUOTA": "custom_color_quota",
         }
         for environment_name, field_name in string_fields.items():
             if environment_name in source:
@@ -158,6 +249,18 @@ class AppSettings(BaseModel):
             values["document_mime_allowlist"] = tuple(
                 item.strip()
                 for item in source["DOCUMENT_MIME_ALLOWLIST"].split(",")
+                if item.strip()
+            )
+        if "CUSTOM_COLOR_MIME_ALLOWLIST" in source:
+            values["custom_color_mime_allowlist"] = tuple(
+                item.strip()
+                for item in source["CUSTOM_COLOR_MIME_ALLOWLIST"].split(",")
+                if item.strip()
+            )
+        if "ADMIN_TELEGRAM_USER_IDS" in source:
+            values["admin_telegram_user_ids"] = tuple(
+                int(item.strip())
+                for item in source["ADMIN_TELEGRAM_USER_IDS"].split(",")
                 if item.strip()
             )
         return cls.model_validate(values)
