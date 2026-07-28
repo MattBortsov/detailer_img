@@ -10,10 +10,12 @@ from uuid import UUID
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from car_wrap.custom_colors.moderation import ModerationResult
 from car_wrap.db.models import (
     AdminAuditEvent,
     CustomColor,
     CustomColorVersion,
+    ModerationAttempt,
 )
 
 
@@ -143,6 +145,70 @@ class CustomColorRepository:
                     reason=admin_reason,
                 )
             )
+        await session.flush()
+        return color
+
+    async def apply_moderation(
+        self,
+        session: AsyncSession,
+        *,
+        color_id: UUID,
+        idempotency_key: str,
+        result: ModerationResult,
+        provider_model: str,
+    ) -> CustomColor:
+        color = await session.scalar(
+            select(CustomColor).where(CustomColor.id == color_id).with_for_update()
+        )
+        if color is None:
+            raise LookupError("custom color not found")
+        version = await session.scalar(
+            select(CustomColorVersion).where(
+                CustomColorVersion.custom_color_id == color.id,
+                CustomColorVersion.version == color.current_version,
+            )
+        )
+        if version is None:
+            raise LookupError("custom color version not found")
+        existing = await session.scalar(
+            select(ModerationAttempt.id).where(
+                ModerationAttempt.custom_color_version_id == version.id,
+                ModerationAttempt.idempotency_key == idempotency_key,
+            )
+        )
+        if existing is not None:
+            return color
+        disposition_value = str(result.disposition)
+        if disposition_value not in {
+            ColorStatus.APPROVED.value,
+            ColorStatus.REJECTED.value,
+            ColorStatus.NEEDS_REVIEW.value,
+        }:
+            raise ValueError("unsupported moderation disposition")
+        reason_code = result.reason_code
+        safety_confidence = result.safety_confidence
+        domain_confidence = result.domain_confidence
+        session.add(
+            ModerationAttempt(
+                custom_color_version_id=version.id,
+                idempotency_key=idempotency_key,
+                provider_model=provider_model,
+                decision=disposition_value,
+                reason_code=reason_code,
+                safety_confidence=safety_confidence * 100,
+                domain_confidence=domain_confidence * 100,
+            )
+        )
+        now = datetime.now(UTC)
+        if color.status in {
+            ColorStatus.PENDING.value,
+            ColorStatus.NEEDS_REVIEW.value,
+        }:
+            color.status = disposition_value
+            color.reason_code = reason_code
+            color.updated_at = now
+            if disposition_value == ColorStatus.APPROVED.value:
+                color.approved_at = now
         await session.flush()
         return color
 

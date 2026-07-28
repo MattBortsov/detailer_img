@@ -10,12 +10,16 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from car_wrap.custom_colors.moderation import (
+    ModerationDisposition,
+    ModerationResult,
+)
 from car_wrap.custom_colors.repository import (
     CustomColorRepository,
     QuotaExceededError,
     VersionInput,
 )
-from car_wrap.db.models import CustomColor, CustomColorVersion
+from car_wrap.db.models import CustomColor, CustomColorVersion, ModerationAttempt
 
 pytestmark = pytest.mark.postgresql
 
@@ -91,3 +95,46 @@ async def test_quota_is_atomic_per_owner(database_engine: AsyncEngine) -> None:
             )
         )
     assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_moderation_application_is_idempotent(
+    database_engine: AsyncEngine,
+) -> None:
+    sessions = async_sessionmaker(database_engine, expire_on_commit=False)
+    repository = CustomColorRepository(quota=20)
+    async with sessions() as session:
+        color = await repository.create(
+            session,
+            owner_id=909,
+            display_name="Bronze",
+            version=version_input("aa/bb/" + "d" * 32 + ".png"),
+        )
+        result = ModerationResult(
+            ModerationDisposition.APPROVED,
+            "approved",
+            98,
+            96,
+        )
+        await repository.apply_moderation(
+            session,
+            color_id=color.id,
+            idempotency_key="moderation-1",
+            result=result,
+            provider_model="vision-model",
+        )
+        await repository.apply_moderation(
+            session,
+            color_id=color.id,
+            idempotency_key="moderation-1",
+            result=result,
+            provider_model="vision-model",
+        )
+        await session.commit()
+
+    async with sessions() as session:
+        stored_color = await session.get(CustomColor, color.id)
+        attempt_count = await session.scalar(select(func.count(ModerationAttempt.id)))
+    assert stored_color is not None
+    assert stored_color.status == "approved"
+    assert attempt_count == 1
