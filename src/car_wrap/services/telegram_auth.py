@@ -6,11 +6,17 @@ import hashlib
 import hmac
 import json
 import re
+import secrets
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qsl
 
+from pydantic import SecretStr
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from car_wrap.config import AppSettings
+from car_wrap.db.models import MiniAppSession
 
 _INVALID_PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
@@ -30,6 +36,15 @@ class AuthenticatedTelegramUser:
 
     telegram_user_id: int
     auth_date: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class IssuedMiniAppSession:
+    """Opaque browser capability with a redacted raw token."""
+
+    token: SecretStr
+    telegram_user_id: int
+    expires_at: datetime
 
 
 def _contains_control(value: str) -> bool:
@@ -166,3 +181,45 @@ def validate_init_data(
         raise
     except (OverflowError, TypeError, UnicodeError, ValueError):
         raise TelegramAuthenticationError from None
+
+
+async def exchange_init_data(
+    session: AsyncSession,
+    raw_init_data: str,
+    *,
+    settings: AppSettings,
+    now: datetime,
+) -> IssuedMiniAppSession:
+    """Exchange one valid launch proof for one digest-backed opaque token."""
+
+    authenticated = validate_init_data(
+        raw_init_data,
+        settings=settings,
+        now=now,
+    )
+    raw_token = secrets.token_urlsafe(32)
+    expires_at = now.astimezone(UTC) + timedelta(
+        seconds=settings.session_ttl_seconds
+    )
+    row = MiniAppSession(
+        token_sha256=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
+        init_data_sha256=hashlib.sha256(
+            raw_init_data.encode("utf-8")
+        ).hexdigest(),
+        telegram_user_id=authenticated.telegram_user_id,
+        auth_date=authenticated.auth_date,
+        created_at=now.astimezone(UTC),
+        expires_at=expires_at,
+        revoked_at=None,
+    )
+    session.add(row)
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        raise TelegramAuthenticationError from None
+    return IssuedMiniAppSession(
+        token=SecretStr(raw_token),
+        telegram_user_id=authenticated.telegram_user_id,
+        expires_at=expires_at,
+    )

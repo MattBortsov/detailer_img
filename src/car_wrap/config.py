@@ -41,7 +41,7 @@ class AppSettings(BaseModel):
     bot_token: SecretStr
     bot_username: str
     mini_app_url: str
-    session_cookie_name: str = "__Host-car_wrap_session"
+    session_cookie_name: str = "car_wrap_session"
     init_data_max_bytes: int = Field(default=8192, strict=True, gt=0)
     auth_max_age_seconds: int = Field(default=600, strict=True, gt=0)
     auth_future_skew_seconds: int = Field(default=30, strict=True, ge=0)
