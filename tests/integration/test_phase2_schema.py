@@ -2,40 +2,24 @@
 
 from __future__ import annotations
 
-import os
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
-from sqlalchemy import inspect
+from alembic.config import Config
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.pool import NullPool
 
+from alembic import command
 from car_wrap.db.base import Base
 from car_wrap.db.models import ActiveSource, MiniAppSession
 from car_wrap.db.session import create_session_factory
+from tests.integration.conftest import validate_test_database_url
 
 pytestmark = pytest.mark.postgresql
-
-
-@pytest_asyncio.fixture
-async def database_engine() -> AsyncIterator[AsyncEngine]:
-    database_url = os.environ["CAR_WRAP_TEST_DATABASE_URL"]
-    assert database_url.startswith("postgresql+psycopg://")
-    assert "test" in database_url.rsplit("/", maxsplit=1)[-1]
-    engine = create_async_engine(database_url, poolclass=NullPool)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.drop_all)
-        await connection.run_sync(Base.metadata.create_all)
-    try:
-        yield engine
-    finally:
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.drop_all)
-        await engine.dispose()
 
 
 def active_source_values(**overrides: object) -> dict[str, object]:
@@ -187,3 +171,99 @@ async def test_database_schema_can_be_introspected(
             lambda sync_connection: set(inspect(sync_connection).get_table_names())
         )
     assert {"active_sources", "mini_app_sessions"} <= tables
+
+
+def test_integration_harness_rejects_unsafe_database_targets() -> None:
+    with pytest.raises(ValueError):
+        validate_test_database_url("sqlite:///car_wrap_test.db")
+    with pytest.raises(ValueError):
+        validate_test_database_url(
+            "postgresql+psycopg://user:pass@db/car_wrap"
+        )
+
+
+def alembic_config(test_database_url: str) -> Config:
+    root = Path(__file__).parents[2]
+    config = Config(root / "alembic.ini")
+    config.attributes["database_url"] = test_database_url
+    return config
+
+
+def inspect_schema(sync_connection: object) -> dict[str, object]:
+    schema = inspect(sync_connection)
+    return {
+        "tables": set(schema.get_table_names()),
+        "active_columns": {
+            column["name"] for column in schema.get_columns("active_sources")
+        },
+        "session_columns": {
+            column["name"]
+            for column in schema.get_columns("mini_app_sessions")
+        },
+        "active_checks": {
+            item["name"] for item in schema.get_check_constraints("active_sources")
+        },
+        "session_checks": {
+            item["name"]
+            for item in schema.get_check_constraints("mini_app_sessions")
+        },
+        "session_uniques": {
+            item["name"]
+            for item in schema.get_unique_constraints("mini_app_sessions")
+        },
+    }
+
+
+def test_alembic_upgrade_downgrade_upgrade_parity(
+    test_database_url: str,
+) -> None:
+    config = alembic_config(test_database_url)
+    engine = create_engine(test_database_url, poolclass=NullPool)
+    try:
+        with engine.begin() as connection:
+            Base.metadata.drop_all(connection)
+            connection.exec_driver_sql("DROP TABLE IF EXISTS alembic_version")
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            observed = inspect_schema(connection)
+        assert observed["tables"] == {
+            "active_sources",
+            "alembic_version",
+            "mini_app_sessions",
+        }
+        assert observed["active_columns"] == {
+            column.name for column in ActiveSource.__table__.columns
+        }
+        assert observed["session_columns"] == {
+            column.name for column in MiniAppSession.__table__.columns
+        }
+
+        command.downgrade(config, "base")
+        with engine.connect() as connection:
+            assert set(inspect(connection).get_table_names()) <= {
+                "alembic_version"
+            }
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+
+
+def test_migration_is_metadata_only() -> None:
+    migration = (
+        Path(__file__).parents[2]
+        / "alembic/versions/0001_active_sources_and_mini_app_sessions.py"
+    ).read_text(encoding="utf-8")
+    forbidden = (
+        "LargeBinary",
+        "media_bytes",
+        "base64",
+        "image_url",
+        "file_path",
+        "generation_job",
+        "outbox",
+        "celery",
+        "provider",
+        "result",
+        "delivery",
+    )
+    assert not any(fragment in migration for fragment in forbidden)
