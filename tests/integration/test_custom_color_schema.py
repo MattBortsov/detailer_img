@@ -229,3 +229,51 @@ async def test_restore_only_accepts_hidden_colors(
                 admin_actor_id=1,
                 admin_action="restore",
             )
+
+
+@pytest.mark.asyncio
+async def test_retain_serializes_with_deletion(
+    database_engine: AsyncEngine,
+) -> None:
+    sessions = async_sessionmaker(database_engine, expire_on_commit=False)
+    repository = CustomColorRepository(quota=20)
+    async with sessions() as setup:
+        color = await repository.create(
+            setup,
+            owner_id=818,
+            display_name="Satin",
+            version=version_input("aa/bb/" + "9" * 32 + ".png"),
+        )
+        approved = await repository.transition(
+            setup,
+            color_id=color.id,
+            target=ColorStatus.APPROVED,
+            reason_code="approved",
+        )
+        version = await setup.scalar(
+            select(CustomColorVersion).where(
+                CustomColorVersion.custom_color_id == color.id
+            )
+        )
+        assert approved.status == ColorStatus.APPROVED.value
+        assert version is not None
+        version_id = version.id
+        await setup.commit()
+
+    async with sessions() as deleting, sessions() as retaining:
+        await repository.transition(
+            deleting,
+            color_id=color.id,
+            target=ColorStatus.DELETED,
+            owner_id=818,
+            reason_code="owner_deleted",
+        )
+        retain_task = asyncio.create_task(
+            repository.retain(retaining, version_id=version_id)
+        )
+        await asyncio.sleep(0.05)
+        assert not retain_task.done()
+        await deleting.commit()
+        with pytest.raises(LookupError):
+            await retain_task
+        await retaining.rollback()

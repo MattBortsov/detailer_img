@@ -76,14 +76,23 @@ async def test_upload_select_generate_retain_delete_release_lifecycle(
     )
     repository = CustomColorRepository(quota=20)
     policy = MediaPolicy(decode_timeout_seconds=5)
+    moderation_disposition = {"value": ModerationDisposition.APPROVED}
 
     async def approve(data: bytes) -> ModerationResult:
         assert data.startswith(b"\x89PNG\r\n\x1a\n")
         return ModerationResult(
-            ModerationDisposition.APPROVED,
-            "approved",
+            moderation_disposition["value"],
+            (
+                "approved"
+                if moderation_disposition["value"] is ModerationDisposition.APPROVED
+                else "low_confidence"
+            ),
             99,
-            99,
+            (
+                99
+                if moderation_disposition["value"] is ModerationDisposition.APPROVED
+                else 50
+            ),
         )
 
     service = CustomColorService(
@@ -258,3 +267,37 @@ async def test_upload_select_generate_retain_delete_release_lifecycle(
         assert removed.status_code == 204
     with pytest.raises(FileNotFoundError):
         storage.read(unretained_key, unretained_digest)
+
+    moderation_disposition["value"] = ModerationDisposition.NEEDS_REVIEW
+    actor["id"] = 1001
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://testserver",
+    ) as client:
+        needs_review = await client.post(
+            "/api/v1/custom-colors",
+            headers={"Idempotency-Key": "e2e-upload-3"},
+            files={
+                "name": (None, "Copper Sample"),
+                "image": ("sample.png", original, "image/png"),
+            },
+        )
+        assert needs_review.status_code == 202
+        review_id = UUID(needs_review.json()["id"])
+
+        actor["id"] = 2002
+        concealed = await client.get(
+            f"/api/v1/custom-colors/{review_id}/versions/1/preview"
+        )
+        assert concealed.status_code == 404
+
+        actor["id"] = 9009
+        queue = await client.get("/api/v1/custom-colors/admin/review")
+        assert queue.status_code == 200
+        review_item = next(
+            item for item in queue.json()["items"] if item["id"] == str(review_id)
+        )
+        assert review_item["preview_concealed"] is True
+        revealed = await client.get(review_item["preview_url"])
+        assert revealed.status_code == 200
+        assert revealed.headers["cache-control"] == "private, no-store"

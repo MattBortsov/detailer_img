@@ -15,7 +15,7 @@ from car_wrap.config import AppSettings
 NOW = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
 EXPECTED_CSP = (
     "default-src 'self'; script-src 'self' https://telegram.org; "
-    "style-src 'self'; img-src 'self'; connect-src 'self'; "
+    "style-src 'self'; img-src 'self' blob:; connect-src 'self'; "
     "base-uri 'none'; object-src 'none'; form-action 'self'"
 )
 

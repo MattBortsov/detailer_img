@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from car_wrap.custom_colors.moderation import ModerationResult, normalize_display_name
@@ -286,14 +286,30 @@ class CustomColorRepository:
         *,
         version_id: UUID,
     ) -> None:
-        updated_id = await session.scalar(
-            update(CustomColorVersion)
+        color = await session.scalar(
+            select(CustomColor)
+            .join(
+                CustomColorVersion,
+                CustomColorVersion.custom_color_id == CustomColor.id,
+            )
             .where(CustomColorVersion.id == version_id)
-            .values(retain_count=CustomColorVersion.retain_count + 1)
-            .returning(CustomColorVersion.id)
+            .with_for_update()
         )
-        if updated_id is None:
-            raise LookupError("custom color version not found")
+        if color is None or color.status != ColorStatus.APPROVED.value:
+            raise LookupError("approved custom color version not found")
+        version = await session.scalar(
+            select(CustomColorVersion)
+            .where(
+                CustomColorVersion.id == version_id,
+                CustomColorVersion.custom_color_id == color.id,
+                CustomColorVersion.version == color.current_version,
+            )
+            .with_for_update()
+        )
+        if version is None:
+            raise LookupError("approved custom color version not found")
+        version.retain_count += 1
+        await session.flush()
 
     async def release(
         self,

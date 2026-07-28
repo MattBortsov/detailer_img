@@ -640,6 +640,14 @@ h3 {
   color: var(--color-destructive);
 }
 
+.admin-preview {
+  grid-column: 1 / -1;
+  width: min(100%, 320px);
+  max-height: 240px;
+  border-radius: 12px;
+  object-fit: contain;
+}
+
 .admin-warning {
   padding: 0 var(--space-lg) var(--space-md);
   color: var(--color-warning) !important;

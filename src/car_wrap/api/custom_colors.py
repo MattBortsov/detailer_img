@@ -331,6 +331,10 @@ async def admin_review(
                 "name": color.display_name,
                 "status": color.status,
                 "preview_concealed": True,
+                "preview_url": (
+                    f"/api/v1/custom-colors/{color.id}/versions/"
+                    f"{color.current_version}/preview?reveal=true"
+                ),
             }
             for color in colors
         ]

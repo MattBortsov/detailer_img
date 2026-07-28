@@ -291,6 +291,7 @@ function statusItem(item, admin = false) {
 
   const actionNames = admin
     ? [
+        ["view", "Посмотреть", ""],
         ["approve", "Одобрить", ""],
         ["reject", "Отклонить", "danger"],
         ["delete", "Удалить", "danger"],
@@ -304,9 +305,19 @@ function statusItem(item, admin = false) {
     button.type = "button";
     button.dataset.managementAction = action;
     button.dataset.colorId = item.id;
+    if (action === "view") {
+      button.dataset.previewUrl = item.preview_url;
+    }
     button.textContent = label;
     button.className = className;
     actions.append(button);
+  }
+  if (admin) {
+    const preview = document.createElement("img");
+    preview.className = "admin-preview";
+    preview.alt = `Образец цвета ${item.name}`;
+    preview.hidden = true;
+    row.append(preview);
   }
   return row;
 }
@@ -547,7 +558,27 @@ async function fetchAdminQueue() {
   try {
     const response = await fetchJson("/api/v1/custom-colors/admin/review");
     const payload = await response.json();
-    if (response.ok && Array.isArray(payload.items)) {
+    const valid =
+      exactKeys(payload, ["items"]) &&
+      Array.isArray(payload.items) &&
+      payload.items.every(
+        (item) =>
+          exactKeys(item, [
+            "id",
+            "name",
+            "status",
+            "preview_concealed",
+            "preview_url",
+          ]) &&
+          typeof item.id === "string" &&
+          typeof item.name === "string" &&
+          typeof item.status === "string" &&
+          item.preview_concealed === true &&
+          typeof item.preview_url === "string" &&
+          item.preview_url.startsWith("/api/v1/custom-colors/") &&
+          item.preview_url.endsWith("/preview?reveal=true"),
+      );
+    if (response.ok && valid) {
       state = loadAdminQueue(state, payload.items);
     }
   } catch {
@@ -827,6 +858,30 @@ elements.adminList.addEventListener("click", async (event) => {
   const colorId = button.dataset.colorId;
   const action = button.dataset.managementAction;
   if (!colorId || !action) {
+    return;
+  }
+  if (action === "view") {
+    const previewUrl = button.dataset.previewUrl;
+    const preview = button
+      .closest(".management-item")
+      ?.querySelector(".admin-preview");
+    if (
+      !(preview instanceof HTMLImageElement) ||
+      typeof previewUrl !== "string" ||
+      !previewUrl.startsWith("/api/v1/custom-colors/") ||
+      !previewUrl.endsWith("/preview?reveal=true")
+    ) {
+      return;
+    }
+    if (preview.hidden) {
+      preview.src = previewUrl;
+      preview.hidden = false;
+      button.textContent = "Скрыть";
+    } else {
+      preview.removeAttribute("src");
+      preview.hidden = true;
+      button.textContent = "Посмотреть";
+    }
     return;
   }
   const reason =

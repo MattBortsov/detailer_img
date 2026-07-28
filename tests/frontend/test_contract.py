@@ -136,6 +136,19 @@ def test_add_color_sheet_has_exact_disclosure_and_iphone_formats() -> None:
     ]
 
 
+def test_admin_review_requires_explicit_concealed_preview_action() -> None:
+    _, css, js, parser = sources()
+
+    assert "Посмотреть" in js
+    assert "preview_concealed" in js
+    assert "/preview?reveal=true" in js
+    assert ".admin-preview" in css
+    assert not any(
+        tag == "img" and "admin-preview" in (attrs.get("class") or "")
+        for tag, attrs in parser.tags
+    )
+
+
 def test_accessibility_responsive_and_privacy_boundaries() -> None:
     html, css, js, parser = sources()
     buttons = [attrs for tag, attrs in parser.tags if tag == "button"]

@@ -22,7 +22,7 @@ from car_wrap.services.telegram_auth import exchange_init_data
 
 CONTENT_SECURITY_POLICY = (
     "default-src 'self'; script-src 'self' https://telegram.org; "
-    "style-src 'self'; img-src 'self'; connect-src 'self'; "
+    "style-src 'self'; img-src 'self' blob:; connect-src 'self'; "
     "base-uri 'none'; object-src 'none'; form-action 'self'"
 )
 
@@ -84,7 +84,10 @@ def create_app(
         response.headers["Permissions-Policy"] = (
             "camera=(), microphone=(), geolocation=()"
         )
-        if request.url.path.startswith("/api/"):
+        if (
+            request.url.path.startswith("/api/")
+            and "cache-control" not in response.headers
+        ):
             response.headers["Cache-Control"] = "no-store"
         return response
 
