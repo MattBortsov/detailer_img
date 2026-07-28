@@ -26,7 +26,6 @@ from car_wrap.eval.manifest import (
 )
 from car_wrap.eval.models import (
     CorpusManifest,
-    EvaluationColor,
     FixtureMetadata,
     GateThresholds,
     ImageGenerationRequest,
@@ -46,6 +45,7 @@ from car_wrap.eval.run_manifest import (
     validate_evidence_binding,
     write_generation_run,
 )
+from car_wrap.palette import EVALUATION_COLORS
 from car_wrap.prompting import PROMPT_REVISION
 
 EXIT_PASS = 0
@@ -55,34 +55,6 @@ EXIT_PROVIDER_FAILED = 3
 
 _RUN_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _SCORES = TypeAdapter(list[ScoredCase])
-_COLORS = {
-    "bright-yellow": EvaluationColor(
-        color_id="bright-yellow", display_name="Bright Yellow", rgb_hex="#FFD21C"
-    ),
-    "charcoal": EvaluationColor(
-        color_id="charcoal", display_name="Charcoal", rgb_hex="#343A40"
-    ),
-    "copper": EvaluationColor(
-        color_id="copper", display_name="Copper", rgb_hex="#B66A3C"
-    ),
-    "deep-blue": EvaluationColor(
-        color_id="deep-blue", display_name="Deep Blue", rgb_hex="#123A66"
-    ),
-    "forest-green": EvaluationColor(
-        color_id="forest-green", display_name="Forest Green", rgb_hex="#275D38"
-    ),
-    "pearl-white": EvaluationColor(
-        color_id="pearl-white", display_name="Pearl White", rgb_hex="#F4F1E8"
-    ),
-    "violet": EvaluationColor(
-        color_id="violet", display_name="Violet", rgb_hex="#6846A5"
-    ),
-    "warm-red": EvaluationColor(
-        color_id="warm-red", display_name="Warm Red", rgb_hex="#B83232"
-    ),
-}
-
-
 class CliInputError(ValueError):
     """Fixed-message invalid command evidence."""
 
@@ -278,7 +250,7 @@ async def _generate_live(
                 source_bytes=source,
                 source_media_type=metadata[case.case_id].source_media_type,
                 fixture=metadata[case.case_id],
-                color=_COLORS.get(case.color_id)
+                color=EVALUATION_COLORS.get(case.color_id)
                 or (_ for _ in ()).throw(CliInputError()),
             )
             started = datetime.now(UTC)
