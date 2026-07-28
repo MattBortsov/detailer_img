@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    >
+    <title>Выбор цвета</title>
+    <link rel="stylesheet" href="/app.css">
+    <script
+      src="https://telegram.org/js/telegram-web-app.js"
+      defer
+    ></script>
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <main class="app-shell" id="app">
+      <section class="loading-state" id="loading-state" aria-labelledby="loading-title">
+        <div class="status-icon spinner" aria-hidden="true"></div>
+        <h1 id="loading-title" tabindex="-1">Проверяем сессию</h1>
+        <p role="status" aria-live="polite">Загружаем палитру…</p>
+      </section>
+
+      <section id="ready-state" hidden>
+        <header class="page-header">
+          <h1>Выберите цвет</h1>
+          <p>Цвет применится ко всем видимым окрашенным частям авто.</p>
+        </header>
+
+        <section class="readiness-panel" aria-labelledby="ready-title">
+          <svg
+            class="status-icon"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path d="M5 12.5 9.5 17 19 7.5"></path>
+          </svg>
+          <div>
+            <h2 id="ready-title">Фото готово</h2>
+            <p>Используем последнее принятое фото из чата.</p>
+          </div>
+        </section>
+
+        <form id="palette-form" novalidate>
+          <fieldset>
+            <legend>Палитра</legend>
+            <div class="palette-grid" id="palette-grid"></div>
+          </fieldset>
+          <p class="privacy-copy" id="privacy-copy"></p>
+          <p class="selection-status" id="selection-status" aria-live="polite"></p>
+          <div class="inline-alert" id="inline-alert" role="alert" hidden></div>
+          <div class="action-bar">
+            <p id="action-hint">Выберите один вариант</p>
+            <button id="submit-button" type="submit" disabled>
+              Оклеить авто в этот цвет
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section
+        class="recovery-state"
+        id="no-source-state"
+        aria-labelledby="no-source-title"
+        hidden
+      >
+        <h1 id="no-source-title" tabindex="-1">Сначала отправьте фото</h1>
+        <p>
+          Отправьте в чат фото автомобиля или мотоцикла, затем снова
+          откройте палитру.
+        </p>
+        <button type="button" data-open-chat>Открыть чат</button>
+      </section>
+
+      <section
+        class="recovery-state"
+        id="auth-failed-state"
+        aria-labelledby="auth-failed-title"
+        hidden
+      >
+        <h1 id="auth-failed-title" tabindex="-1">Сессия истекла</h1>
+        <p>Откройте палитру заново из последнего сообщения бота.</p>
+        <button type="button" data-open-chat>Открыть чат</button>
+      </section>
+
+      <section
+        class="recovery-state"
+        id="palette-failed-state"
+        aria-labelledby="palette-failed-title"
+        hidden
+      >
+        <h1 id="palette-failed-title" tabindex="-1">
+          Не удалось загрузить палитру
+        </h1>
+        <p>Проверьте подключение и попробуйте ещё раз.</p>
+        <button type="button" id="retry-palette">
+          Загрузить палитру снова
+        </button>
+      </section>
+    </main>
+
+    <template id="choice-template">
+      <div class="choice">
+        <input
+          class="visually-hidden choice-input"
+          type="radio"
+          name="color_id"
+        >
+        <label class="choice-card">
+          <span class="swatch" aria-hidden="true"></span>
+          <span class="choice-name"></span>
+          <span class="choice-check" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M5 12.5 9.5 17 19 7.5"></path>
+            </svg>
+          </span>
+        </label>
+      </div>
+    </template>
+  </body>
+</html>
