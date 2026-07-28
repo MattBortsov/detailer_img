@@ -13,6 +13,7 @@ dependencies = [
   "fastapi==0.140.0",
   "httpx==0.28.1",
   "Pillow==12.3.0",
+  "pillow-heif==1.1.1",
   "pydantic==2.13.4",
   "pydantic-settings==2.14.2",
   "psycopg[binary]==3.3.4",
@@ -62,4 +63,8 @@ mypy_path = "src"
 
 [[tool.mypy.overrides]]
 module = "yaml"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pillow_heif"
 ignore_missing_imports = true
