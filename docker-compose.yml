@@ -1,0 +1,173 @@
+name: detailer-img
+
+x-app-environment: &app-environment
+  DATABASE_URL: ${DATABASE_URL:-}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+  MINI_APP_URL: ${MINI_APP_URL:-}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  OPENROUTER_IMAGE_MODEL: ${OPENROUTER_IMAGE_MODEL:-x-ai/grok-imagine-image-quality}
+  MODERATION_VISION_MODEL: ${MODERATION_VISION_MODEL:-google/gemini-2.5-flash}
+  ADMIN_TELEGRAM_USER_IDS: ${ADMIN_TELEGRAM_USER_IDS:-}
+  CUSTOM_COLOR_STORAGE_ROOT: /var/lib/car-wrap/custom-colors
+  CUSTOM_COLOR_MAX_BYTES: ${CUSTOM_COLOR_MAX_BYTES:-8388608}
+  CUSTOM_COLOR_MAX_SIDE_PX: ${CUSTOM_COLOR_MAX_SIDE_PX:-8192}
+  CUSTOM_COLOR_MAX_PIXELS: ${CUSTOM_COLOR_MAX_PIXELS:-20000000}
+  CUSTOM_COLOR_MAX_FRAMES: "1"
+  CUSTOM_COLOR_OUTPUT_LONG_EDGE_PX: ${CUSTOM_COLOR_OUTPUT_LONG_EDGE_PX:-2048}
+  CUSTOM_COLOR_DECODE_TIMEOUT_SECONDS: ${CUSTOM_COLOR_DECODE_TIMEOUT_SECONDS:-15}
+  CUSTOM_COLOR_QUOTA: ${CUSTOM_COLOR_QUOTA:-20}
+  CLAMAV_SOCKET_PATH: /run/clamav/clamd.sock
+
+x-app-image: &app-image
+  image: detailer-img:${APP_IMAGE_TAG:-local}
+
+services:
+  postgres:
+    image: postgres:16.14-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-car_wrap}
+      POSTGRES_USER: ${POSTGRES_USER:-car_wrap}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  clamav:
+    image: clamav/clamav:1.4.5-debian13-slim
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        sed -i '/^StreamMaxLength /d;/^ConcurrentDatabaseReload /d' /etc/clamav/clamd.conf
+        printf '\nStreamMaxLength 8M\nConcurrentDatabaseReload no\n' >> /etc/clamav/clamd.conf
+        sed -i '/^TestDatabases /d' /etc/clamav/freshclam.conf
+        printf '\nTestDatabases no\n' >> /etc/clamav/freshclam.conf
+        exec /init
+    environment:
+      CLAMD_STARTUP_TIMEOUT: "600"
+      FRESHCLAM_CHECKS: "2"
+    volumes:
+      - clamav_database:/var/lib/clamav
+      - clamav_socket:/tmp
+    networks:
+      - scanner_egress
+    mem_limit: 2300m
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - test -S /tmp/clamd.sock && clamdscan --ping=3
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 180s
+
+  storage-init:
+    <<: *app-image
+    user: "0:0"
+    command:
+      - /usr/bin/install
+      - -d
+      - -m
+      - "0700"
+      - -o
+      - "10001"
+      - -g
+      - "10001"
+      - /var/lib/car-wrap/custom-colors
+    volumes:
+      - custom_color_data:/var/lib/car-wrap/custom-colors
+    networks:
+      - backend
+    restart: "no"
+
+  migrate:
+    <<: *app-image
+    command: ["python", "-m", "car_wrap.db.migrate"]
+    environment: *app-environment
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *app-image
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    environment: *app-environment
+    volumes:
+      - custom_color_data:/var/lib/car-wrap/custom-colors
+      - clamav_socket:/run/clamav:ro
+    networks:
+      - backend
+      - edge
+    ports:
+      - "127.0.0.1:${APP_BIND_PORT:-8010}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+    mem_limit: 900m
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; socket.create_connection(('127.0.0.1', 8000), 2).close()"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  bot:
+    <<: *app-image
+    command: ["python", "-m", "car_wrap.bot.main"]
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    environment: *app-environment
+    networks:
+      - backend
+      - edge
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    mem_limit: 256m
+
+volumes:
+  postgres_data:
+  clamav_database:
+  clamav_socket:
+  custom_color_data:
+
+networks:
+  backend:
+    internal: true
+  scanner_egress:
+  edge:

@@ -40,6 +40,7 @@ def create_app(
     custom_color_service: Any = None,
     custom_color_storage: Any = None,
     custom_color_repository: Any = None,
+    lifespan: Any = None,
 ) -> FastAPI:
     """Build an app with explicit configuration and persistence boundaries."""
 
@@ -48,6 +49,7 @@ def create_app(
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=lifespan,
     )
     app.state.settings = settings
     app.state.session_factory = session_factory
