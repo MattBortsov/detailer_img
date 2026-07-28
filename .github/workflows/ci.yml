@@ -90,3 +90,16 @@ jobs:
 
       - name: Validate production Compose
         run: docker compose config --quiet
+
+      - name: Build production image
+        run: docker build --tag detailer-img:ci .
+
+      - name: Reject high-severity runtime vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: detailer-img:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
