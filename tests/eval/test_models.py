@@ -318,7 +318,7 @@ def test_safe_string_fields_reject_transport_and_path_canaries(
         SafeError.model_validate({"code": "invalid_manifest", "message": unsafe_value})
 
 
-def test_project_dependencies_remain_evaluation_only() -> None:
+def test_project_dependencies_do_not_add_queue_or_provider_clients() -> None:
     pyproject_path = Path(__file__).parents[2] / "pyproject.toml"
     pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
     dependencies = pyproject["project"]["dependencies"]
@@ -328,17 +328,15 @@ def test_project_dependencies_remain_evaluation_only() -> None:
     ]
     normalized = " ".join(all_dependencies).lower()
 
-    forbidden = (
-        "aiogram",
-        "telegram",
-        "fastapi",
-        "starlette",
-        "django",
-        "flask",
-        "sqlalchemy",
-        "psycopg",
-        "asyncpg",
-        "redis",
-        "celery",
-    )
+    required_phase2 = {
+        "aiogram==3.30.0",
+        "fastapi==0.140.0",
+        "SQLAlchemy==2.0.51",
+        "alembic==1.18.5",
+        "psycopg[binary]==3.3.4",
+        "uvicorn[standard]==0.51.0",
+    }
+    assert required_phase2.issubset(set(dependencies))
+
+    forbidden = ("redis", "celery", "openai", "openrouter")
     assert not any(name in normalized for name in forbidden)
