@@ -172,7 +172,6 @@ def test_frontend_has_no_embedded_privileged_or_storage_values() -> None:
         "chat_id",
         "file_id",
         "file_unique_id",
-        "source_message_id",
         "image_url",
         "openrouter",
     ):

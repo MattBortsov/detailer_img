@@ -143,6 +143,7 @@ async def test_malformed_authorization_is_one_safe_unauthorized(
 
     assert response.status_code == 401
     assert response.json() == {"detail": "Unauthorized"}
+    assert response.headers["x-bot-chat-url"] == "https://t.me/CarWrapBot"
     assert response.headers["cache-control"] == "no-store"
     rendered = response.text + repr(response.headers)
     assert "signed-launch-canary" not in rendered

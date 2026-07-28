@@ -10,11 +10,14 @@ from car_wrap.services.telegram_auth import TelegramAuthenticationError
 router = APIRouter(prefix="/api/v1/tma", tags=["telegram-session"])
 
 
-def unauthorized_response() -> JSONResponse:
+def unauthorized_response(bot_chat_url: str) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_401_UNAUTHORIZED,
         content={"detail": "Unauthorized"},
-        headers={"Cache-Control": "no-store"},
+        headers={
+            "Cache-Control": "no-store",
+            "X-Bot-Chat-Url": bot_chat_url,
+        },
     )
 
 
@@ -32,8 +35,9 @@ async def create_session(request: Request) -> Response:
 
     headers = raw_authorization_headers(request)
     settings = request.app.state.settings
+    bot_chat_url = f"https://t.me/{settings.bot_username}"
     if len(headers) != 1 or request.query_params:
-        return unauthorized_response()
+        return unauthorized_response(bot_chat_url)
     raw_header = headers[0]
     prefix = b"tma "
     if (
@@ -41,11 +45,11 @@ async def create_session(request: Request) -> Response:
         or len(raw_header) <= len(prefix)
         or len(raw_header) - len(prefix) > settings.init_data_max_bytes
     ):
-        return unauthorized_response()
+        return unauthorized_response(bot_chat_url)
     try:
         raw_init_data = raw_header[len(prefix) :].decode("utf-8")
     except UnicodeDecodeError:
-        return unauthorized_response()
+        return unauthorized_response(bot_chat_url)
 
     try:
         async with request.app.state.session_factory() as session:
@@ -57,7 +61,7 @@ async def create_session(request: Request) -> Response:
             )
             await session.commit()
     except TelegramAuthenticationError:
-        return unauthorized_response()
+        return unauthorized_response(bot_chat_url)
 
     response = Response(
         status_code=status.HTTP_204_NO_CONTENT,
