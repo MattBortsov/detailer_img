@@ -19,7 +19,7 @@ from car_wrap.api.schemas import (
     SelectionValidationIn,
     SelectionValidationOut,
 )
-from car_wrap.db.models import ActiveSource
+from car_wrap.db.models import ActiveSource, CustomColor, CustomColorVersion
 from car_wrap.palette import (
     PALETTE_CHOICES,
     PALETTE_VERSION,
@@ -27,7 +27,9 @@ from car_wrap.palette import (
     PaletteChoice,
     PaletteLookupError,
     SurpriseChoice,
+    custom_selection_id,
     get_palette_choice,
+    parse_custom_selection,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["palette"])
@@ -122,12 +124,42 @@ async def validate_selection(
             detail="Invalid request",
         )
     try:
-        choice = get_palette_choice(payload.color_id)
+        public = public_choice(get_palette_choice(payload.color_id))
     except PaletteLookupError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Palette selection is invalid",
-        ) from None
+        try:
+            requested = parse_custom_selection(payload.color_id)
+        except PaletteLookupError:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Palette selection is invalid",
+            ) from None
+        row = (
+            await session.execute(
+                select(CustomColor, CustomColorVersion)
+                .join(CustomColorVersion)
+                .where(
+                    CustomColor.id == requested.color_id,
+                    CustomColor.status == "approved",
+                    CustomColor.current_version == requested.version,
+                    CustomColorVersion.version == requested.version,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Palette selection is invalid",
+            ) from None
+        custom_color, custom_version = row
+        public = PaletteChoiceOut(
+            color_id=custom_selection_id(
+                custom_color.id,
+                custom_version.version,
+            ),
+            name=custom_color.display_name,
+            display_hex=None,
+            kind="custom",
+        )
     source = await owner_source(session, current.telegram_user_id)
     if source is None:
         raise HTTPException(
@@ -138,5 +170,5 @@ async def validate_selection(
     return SelectionValidationOut(
         status="validated",
         palette_version=PALETTE_VERSION,
-        choice=public_choice(choice),
+        choice=public,
     )

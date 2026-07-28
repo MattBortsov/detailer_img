@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
+from uuid import UUID
 
 from car_wrap.eval.models import EvaluationColor
 
@@ -28,6 +29,13 @@ class PaletteChoice:
     ui_name_ru: str
     display_hex: str
 
+    def to_evaluation_color(self) -> EvaluationColor:
+        return EvaluationColor(
+            color_id=self.color_id,
+            display_name=self.prompt_name,
+            rgb_hex=self.display_hex,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class SurpriseChoice:
@@ -35,6 +43,12 @@ class SurpriseChoice:
 
     color_id: str
     ui_name_ru: str
+
+
+@dataclass(frozen=True, slots=True)
+class CustomSelection:
+    color_id: UUID
+    version: int
 
 
 PALETTE_CHOICES: Final[tuple[PaletteChoice, ...]] = (
@@ -74,14 +88,7 @@ _LOOKUP: Final[Mapping[str, PaletteChoice | SurpriseChoice]] = MappingProxyType(
     }
 )
 EVALUATION_COLORS: Final[Mapping[str, EvaluationColor]] = MappingProxyType(
-    {
-        choice.color_id: EvaluationColor(
-            color_id=choice.color_id,
-            display_name=choice.prompt_name,
-            rgb_hex=choice.display_hex,
-        )
-        for choice in PALETTE_CHOICES
-    }
+    {choice.color_id: choice.to_evaluation_color() for choice in PALETTE_CHOICES}
 )
 
 
@@ -94,3 +101,23 @@ def get_palette_choice(
         return _LOOKUP[color_id]
     except (KeyError, TypeError):
         raise PaletteLookupError from None
+
+
+def custom_selection_id(color_id: UUID, version: int) -> str:
+    if version <= 0:
+        raise ValueError("version must be positive")
+    return f"custom:{color_id}:v{version}"
+
+
+def parse_custom_selection(value: str) -> CustomSelection:
+    parts = value.split(":")
+    if len(parts) != 3 or parts[0] != "custom" or not parts[2].startswith("v"):
+        raise PaletteLookupError
+    try:
+        color_id = UUID(parts[1])
+        version = int(parts[2][1:])
+    except (ValueError, TypeError):
+        raise PaletteLookupError from None
+    if version <= 0 or str(color_id) != parts[1].lower():
+        raise PaletteLookupError
+    return CustomSelection(color_id=color_id, version=version)
