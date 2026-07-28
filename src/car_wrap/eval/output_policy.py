@@ -59,13 +59,13 @@ def resolve_output_directory(destination: Path) -> Path:
         _reject_symlink_components(candidate_absolute)
         output_root = output_root_absolute.resolve(strict=False)
         candidate = candidate_absolute.resolve(strict=False)
-        candidate.relative_to(output_root)
+        relative_candidate = candidate.relative_to(output_root)
     except (OSError, RuntimeError, ValueError):
         raise OutputPolicyError from None
 
     if candidate == output_root or (candidate.exists() and not candidate.is_dir()):
         raise OutputPolicyError
-    if any(part.lower() in _PROHIBITED_PARTS for part in candidate.parts):
+    if any(part.lower() in _PROHIBITED_PARTS for part in relative_candidate.parts):
         raise OutputPolicyError
     if candidate.suffix.lower() == ".log":
         raise OutputPolicyError
