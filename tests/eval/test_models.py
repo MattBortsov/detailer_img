@@ -226,7 +226,7 @@ class _ApiKeyTrap(MutableMapping[str, str]):
 
 def test_offline_settings_do_not_read_openrouter_api_key() -> None:
     default_settings = EvalSettings()
-    assert default_settings.openrouter_image_model == "openai/gpt-image-2"
+    assert default_settings.openrouter_image_model == "x-ai/grok-imagine-image-quality"
 
     settings = EvalSettings.from_environment(_ApiKeyTrap())
 

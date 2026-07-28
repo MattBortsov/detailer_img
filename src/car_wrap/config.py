@@ -9,7 +9,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-DEFAULT_OPENROUTER_IMAGE_MODEL = "openai/gpt-image-2"
+DEFAULT_OPENROUTER_IMAGE_MODEL = "x-ai/grok-imagine-image-quality"
 _MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")
 
 
