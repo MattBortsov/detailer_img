@@ -1,0 +1,257 @@
+"""Authenticated palette readiness and validation API."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from car_wrap.api.app import create_app
+from car_wrap.api.dependencies import (
+    CurrentMiniAppSession,
+    require_mini_app_session,
+)
+from car_wrap.config import AppSettings
+from car_wrap.db.models import ActiveSource
+
+NOW = datetime(2026, 7, 28, 10, 30, tzinfo=UTC)
+SUBMISSION_ID = "6db32e02-9371-450c-851f-f187bea635d5"
+
+
+def settings() -> AppSettings:
+    return AppSettings.model_validate(
+        {
+            "database_url": "postgresql+psycopg://user:pass@db/test",
+            "bot_token": "token",
+            "bot_username": "CarWrapBot",
+            "mini_app_url": "https://wrap.example.com/app",
+        }
+    )
+
+
+def source() -> ActiveSource:
+    return ActiveSource(
+        telegram_user_id=1001,
+        chat_id=1001,
+        source_message_id=77,
+        telegram_file_id="file-secret-canary",
+        telegram_file_unique_id="unique-secret-canary",
+        media_kind="photo",
+        mime_type="image/jpeg",
+        byte_size=1024,
+        width=1200,
+        height=800,
+        accepted_at=NOW,
+        updated_at=NOW,
+    )
+
+
+class FakeSession:
+    def __init__(self, active_source: ActiveSource | None) -> None:
+        self.active_source = active_source
+        self.scalar_calls = 0
+
+    async def scalar(self, statement: object) -> ActiveSource | None:
+        del statement
+        self.scalar_calls += 1
+        return self.active_source
+
+
+class SessionContext:
+    def __init__(self, session: FakeSession) -> None:
+        self.session = session
+
+    async def __aenter__(self) -> FakeSession:
+        return self.session
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+
+class FakeSessions:
+    def __init__(self, active_source: ActiveSource | None) -> None:
+        self.session = FakeSession(active_source)
+
+    def __call__(self) -> SessionContext:
+        return SessionContext(self.session)
+
+
+def build_app(active_source: ActiveSource | None) -> tuple[Any, FakeSessions]:
+    sessions = FakeSessions(active_source)
+    app = create_app(
+        settings=settings(),
+        session_factory=sessions,
+        clock=lambda: NOW,
+    )
+    app.dependency_overrides[require_mini_app_session] = lambda: (
+        CurrentMiniAppSession(
+            telegram_user_id=1001,
+            expires_at=NOW + timedelta(minutes=15),
+        )
+    )
+    return app, sessions
+
+
+@pytest.mark.asyncio
+async def test_palette_state_exposes_only_safe_ordered_owner_state() -> None:
+    app, sessions = build_app(source())
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.get("/api/v1/palette-state")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    payload = response.json()
+    assert payload["palette_version"] == "1"
+    assert payload["source_ready"] is True
+    assert payload["source_message_id"] == 77
+    assert payload["bot_chat_url"] == "https://t.me/CarWrapBot"
+    assert payload["privacy_text"] == (
+        "Приложение не сохраняет файлы изображений. Telegram и AI-провайдер "
+        "обрабатывают фото для создания визуализации."
+    )
+    assert [choice["color_id"] for choice in payload["choices"]] == [
+        "pearl-white",
+        "charcoal",
+        "deep-blue",
+        "warm-red",
+        "forest-green",
+        "copper",
+        "bright-yellow",
+        "violet",
+        "surprise_me",
+    ]
+    assert payload["choices"][-1] == {
+        "color_id": "surprise_me",
+        "name": "Удиви меня",
+        "display_hex": None,
+        "kind": "surprise",
+    }
+    rendered = response.text
+    for forbidden in (
+        "telegram_user_id",
+        "chat_id",
+        "file-secret-canary",
+        "unique-secret-canary",
+        "mime_type",
+        "byte_size",
+        "width",
+        "height",
+        "model",
+        "prompt",
+        "provider",
+        "token",
+        "digest",
+        "image_url",
+    ):
+        assert forbidden not in rendered
+    assert sessions.session.scalar_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_palette_state_without_source_is_explicit_and_query_fails() -> None:
+    app, _ = build_app(None)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.get("/api/v1/palette-state")
+        injected = await client.get(
+            "/api/v1/palette-state",
+            params={"telegram_user_id": "9999"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["source_ready"] is False
+    assert response.json()["source_message_id"] is None
+    assert injected.status_code == 400
+
+
+@pytest.mark.parametrize("color_id", ["charcoal", "surprise_me"])
+@pytest.mark.asyncio
+async def test_selection_validation_accepts_only_catalog_intent(
+    color_id: str,
+) -> None:
+    app, sessions = build_app(source())
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/palette-selection/validate",
+            json={
+                "color_id": color_id,
+                "client_submission_uuid": SUBMISSION_ID,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    payload = response.json()
+    assert payload["status"] == "validated"
+    assert payload["palette_version"] == "1"
+    assert payload["choice"]["color_id"] == color_id
+    assert "client_submission_uuid" not in payload
+    assert sessions.session.scalar_calls == 1
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "color_id": "unknown",
+            "client_submission_uuid": SUBMISSION_ID,
+        },
+        {"color_id": "charcoal"},
+        {
+            "color_id": "charcoal",
+            "client_submission_uuid": SUBMISSION_ID,
+            "telegram_user_id": 9999,
+        },
+        {
+            "color_id": "charcoal",
+            "client_submission_uuid": SUBMISSION_ID,
+            "display_hex": "#000000",
+        },
+    ],
+)
+@pytest.mark.asyncio
+async def test_unknown_missing_and_privileged_fields_fail_closed(
+    payload: dict[str, object],
+) -> None:
+    app, _ = build_app(source())
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/palette-selection/validate",
+            json=payload,
+        )
+
+    assert response.status_code in {409, 422}
+    assert "9999" not in response.text
+    assert "#000000" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_selection_requires_current_owner_source() -> None:
+    app, _ = build_app(None)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/palette-selection/validate",
+            json={
+                "color_id": "charcoal",
+                "client_submission_uuid": SUBMISSION_ID,
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Active source is unavailable"}
