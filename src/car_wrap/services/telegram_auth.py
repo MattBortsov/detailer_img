@@ -65,9 +65,7 @@ def _parse_unique_fields(raw_init_data: str) -> dict[str, str]:
         separator="&",
     )
     if not pairs or any(
-        not key
-        or _contains_control(key)
-        or _contains_control(value)
+        not key or _contains_control(key) or _contains_control(value)
         for key, value in pairs
     ):
         raise TelegramAuthenticationError
@@ -89,9 +87,7 @@ def _verify_signature(
     if not _SHA256_HEX.fullmatch(received_hash):
         raise TelegramAuthenticationError
     data_check_string = "\n".join(
-        f"{key}={value}"
-        for key, value in sorted(fields.items())
-        if key != "hash"
+        f"{key}={value}" for key, value in sorted(fields.items()) if key != "hash"
     )
     secret_key = hmac.new(
         b"WebAppData",
@@ -198,14 +194,10 @@ async def exchange_init_data(
         now=now,
     )
     raw_token = secrets.token_urlsafe(32)
-    expires_at = now.astimezone(UTC) + timedelta(
-        seconds=settings.session_ttl_seconds
-    )
+    expires_at = now.astimezone(UTC) + timedelta(seconds=settings.session_ttl_seconds)
     row = MiniAppSession(
         token_sha256=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
-        init_data_sha256=hashlib.sha256(
-            raw_init_data.encode("utf-8")
-        ).hexdigest(),
+        init_data_sha256=hashlib.sha256(raw_init_data.encode("utf-8")).hexdigest(),
         telegram_user_id=authenticated.telegram_user_id,
         auth_date=authenticated.auth_date,
         created_at=now.astimezone(UTC),

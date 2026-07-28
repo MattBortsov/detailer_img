@@ -85,11 +85,9 @@ def build_app(active_source: ActiveSource | None) -> tuple[Any, FakeSessions]:
         session_factory=sessions,
         clock=lambda: NOW,
     )
-    app.dependency_overrides[require_mini_app_session] = lambda: (
-        CurrentMiniAppSession(
-            telegram_user_id=1001,
-            expires_at=NOW + timedelta(minutes=15),
-        )
+    app.dependency_overrides[require_mini_app_session] = lambda: CurrentMiniAppSession(
+        telegram_user_id=1001,
+        expires_at=NOW + timedelta(minutes=15),
     )
     return app, sessions
 

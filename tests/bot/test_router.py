@@ -110,9 +110,7 @@ def message(
 ) -> SimpleNamespace:
     return SimpleNamespace(
         message_id=message_id,
-        from_user=(
-            None if user_id is None else SimpleNamespace(id=user_id)
-        ),
+        from_user=(None if user_id is None else SimpleNamespace(id=user_id)),
         chat=SimpleNamespace(id=chat_id, type=chat_type),
         photo=[media] if isinstance(media, PhotoSize) else None,
         document=media if isinstance(media, Document) else None,

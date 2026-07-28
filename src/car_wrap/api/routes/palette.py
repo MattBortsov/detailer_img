@@ -96,14 +96,9 @@ async def palette_state(
     )
     return PaletteStateOut(
         palette_version=PALETTE_VERSION,
-        choices=tuple(
-            public_choice(choice)
-            for choice in catalog
-        ),
+        choices=tuple(public_choice(choice) for choice in catalog),
         source_ready=source is not None,
-        source_message_id=(
-            source.source_message_id if source is not None else None
-        ),
+        source_message_id=(source.source_message_id if source is not None else None),
         bot_chat_url=f"https://t.me/{settings.bot_username}",
         privacy_text=PRIVACY_TEXT,
         session_expires_at=current.expires_at,

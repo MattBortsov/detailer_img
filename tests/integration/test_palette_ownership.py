@@ -95,11 +95,9 @@ async def test_cookie_owner_cannot_read_or_validate_another_source(
         session_factory=sessions,
         clock=lambda: NOW,
     )
-    app.dependency_overrides[require_mini_app_session] = lambda: (
-        CurrentMiniAppSession(
-            telegram_user_id=1001,
-            expires_at=NOW + timedelta(minutes=15),
-        )
+    app.dependency_overrides[require_mini_app_session] = lambda: CurrentMiniAppSession(
+        telegram_user_id=1001,
+        expires_at=NOW + timedelta(minutes=15),
     )
     before = await row_counts(sessions)
     async with AsyncClient(
@@ -142,9 +140,7 @@ async def test_other_owner_source_does_not_satisfy_current_owner(
         session.add_all([source(1001, 77), source(2002, 99)])
         await session.commit()
         await session.execute(
-            delete(ActiveSource).where(
-                ActiveSource.telegram_user_id == 1001
-            )
+            delete(ActiveSource).where(ActiveSource.telegram_user_id == 1001)
         )
         await session.commit()
 
@@ -153,11 +149,9 @@ async def test_other_owner_source_does_not_satisfy_current_owner(
         session_factory=sessions,
         clock=lambda: NOW,
     )
-    app.dependency_overrides[require_mini_app_session] = lambda: (
-        CurrentMiniAppSession(
-            telegram_user_id=1001,
-            expires_at=NOW + timedelta(minutes=15),
-        )
+    app.dependency_overrides[require_mini_app_session] = lambda: CurrentMiniAppSession(
+        telegram_user_id=1001,
+        expires_at=NOW + timedelta(minutes=15),
     )
     before = await row_counts(sessions)
     async with AsyncClient(

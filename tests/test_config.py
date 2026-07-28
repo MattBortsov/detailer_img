@@ -12,9 +12,7 @@ from car_wrap.config import AppSettings, EvalSettings
 
 def valid_environment() -> dict[str, str]:
     return {
-        "DATABASE_URL": (
-            "postgresql+psycopg://car_wrap:database-canary@db/car_wrap"
-        ),
+        "DATABASE_URL": ("postgresql+psycopg://car_wrap:database-canary@db/car_wrap"),
         "TELEGRAM_BOT_TOKEN": "bot-token-canary",
         "TELEGRAM_BOT_USERNAME": "CarWrapBot",
         "MINI_APP_URL": "https://wrap.example.com/app",
@@ -91,9 +89,7 @@ def test_app_settings_redacts_credentials_in_all_common_outputs() -> None:
 
 def test_app_settings_validation_error_does_not_expose_credentials() -> None:
     environ = valid_environment()
-    environ["DATABASE_URL"] = (
-        "mysql://car_wrap:database-canary@db/car_wrap"
-    )
+    environ["DATABASE_URL"] = "mysql://car_wrap:database-canary@db/car_wrap"
 
     with pytest.raises(ValidationError) as caught:
         AppSettings.from_environment(environ)

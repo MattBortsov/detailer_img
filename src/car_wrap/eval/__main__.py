@@ -55,6 +55,8 @@ EXIT_PROVIDER_FAILED = 3
 
 _RUN_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _SCORES = TypeAdapter(list[ScoredCase])
+
+
 class CliInputError(ValueError):
     """Fixed-message invalid command evidence."""
 

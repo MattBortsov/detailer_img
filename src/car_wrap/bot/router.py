@@ -31,15 +31,10 @@ NO_SOURCE_COPY = (
     "кадр, где хорошо видны окрашенные части."
 )
 UNSUPPORTED_MESSAGE_COPY = (
-    "Нужна фотография автомобиля или мотоцикла. "
-    "Отправьте фото или изображение файлом."
+    "Нужна фотография автомобиля или мотоцикла. Отправьте фото или изображение файлом."
 )
-WINNING_SOURCE_COPY = (
-    "Это фото выбрано для оклейки. Теперь выберите цвет."
-)
-OLDER_SOURCE_COPY = (
-    "Фото принято, но для оклейки уже выбрано более новое фото."
-)
+WINNING_SOURCE_COPY = "Это фото выбрано для оклейки. Теперь выберите цвет."
+OLDER_SOURCE_COPY = "Фото принято, но для оклейки уже выбрано более новое фото."
 
 ActiveSourceSetter = Callable[..., Awaitable[ActiveSourceDecision]]
 
@@ -69,8 +64,7 @@ def rejection_copy(
             "image/webp": "WebP",
         }
         allowed = ", ".join(
-            labels[mime_type]
-            for mime_type in settings.document_mime_allowlist
+            labels[mime_type] for mime_type in settings.document_mime_allowlist
         )
         return (
             "Этот формат не поддерживается. Отправьте изображение "
@@ -95,10 +89,7 @@ def rejection_copy(
             "Уменьшите разрешение и отправьте его снова."
         )
     if rejection.code is MediaRejectionCode.DOWNLOAD_FAILED:
-        return (
-            "Не удалось получить фото из Telegram. "
-            "Отправьте его ещё раз."
-        )
+        return "Не удалось получить фото из Telegram. Отправьте его ещё раз."
     return "Не удалось прочитать изображение. Отправьте другой файл."
 
 
@@ -176,9 +167,7 @@ async def handle_media_message(
 
     text = WINNING_SOURCE_COPY if decision.became_active else OLDER_SOURCE_COPY
     button_text = (
-        "Выбрать цвет"
-        if decision.became_active
-        else "Выбрать цвет для активного фото"
+        "Выбрать цвет" if decision.became_active else "Выбрать цвет для активного фото"
     )
     await bot.send_message(
         message.chat.id,

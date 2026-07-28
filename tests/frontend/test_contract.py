@@ -75,14 +75,9 @@ def test_exact_safe_copy_and_external_assets() -> None:
 
     assert "<style" not in source
     assert not any(
-        tag == "script" and attrs.get("src") is None
-        for tag, attrs in parser.tags
+        tag == "script" and attrs.get("src") is None for tag, attrs in parser.tags
     )
-    scripts = [
-        attrs.get("src")
-        for tag, attrs in parser.tags
-        if tag == "script"
-    ]
+    scripts = [attrs.get("src") for tag, attrs in parser.tags if tag == "script"]
     assert "https://telegram.org/js/telegram-web-app.js" in scripts
     assert "./app.js" in scripts
     assert 'href="./app.css"' in source
@@ -90,9 +85,7 @@ def test_exact_safe_copy_and_external_assets() -> None:
 
 def test_prohibited_controls_and_phase3_ui_are_absent() -> None:
     source, parser = parse_contract()
-    input_types = {
-        attrs.get("type") for tag, attrs in parser.tags if tag == "input"
-    }
+    input_types = {attrs.get("type") for tag, attrs in parser.tags if tag == "input"}
     lowered = source.lower()
 
     assert not {"file", "text", "color"} & input_types
@@ -157,9 +150,8 @@ def test_css_matches_spacing_responsive_focus_and_motion_contract() -> None:
 
 
 def test_frontend_has_no_embedded_privileged_or_storage_values() -> None:
-    combined = (
-        HTML_PATH.read_text(encoding="utf-8")
-        + (APP_JS_PATH.read_text(encoding="utf-8") if APP_JS_PATH.exists() else "")
+    combined = HTML_PATH.read_text(encoding="utf-8") + (
+        APP_JS_PATH.read_text(encoding="utf-8") if APP_JS_PATH.exists() else ""
     )
     for forbidden in (
         "localStorage",

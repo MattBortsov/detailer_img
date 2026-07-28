@@ -19,13 +19,9 @@ from pydantic import (
 
 DEFAULT_OPENROUTER_IMAGE_MODEL = "x-ai/grok-imagine-image-quality"
 _MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")
-_BOT_USERNAME_PATTERN = re.compile(
-    r"^[A-Za-z][A-Za-z0-9_]{3,27}[Bb][Oo][Tt]$"
-)
+_BOT_USERNAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{3,27}[Bb][Oo][Tt]$")
 _COOKIE_NAME_PATTERN = re.compile(r"^(?:__Host-)?[A-Za-z0-9_-]{1,64}$")
-_SUPPORTED_DOCUMENT_MIME_TYPES = frozenset(
-    {"image/jpeg", "image/png", "image/webp"}
-)
+_SUPPORTED_DOCUMENT_MIME_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
 
 
 class AppSettings(BaseModel):

@@ -55,9 +55,7 @@ def test_catalog_and_evaluation_mapping_are_immutable_and_compatible() -> None:
     with pytest.raises(TypeError):
         EVALUATION_COLORS["new"] = EVALUATION_COLORS["charcoal"]  # type: ignore[index]
 
-    assert list(EVALUATION_COLORS) == [
-        choice.color_id for choice in PALETTE_CHOICES
-    ]
+    assert list(EVALUATION_COLORS) == [choice.color_id for choice in PALETTE_CHOICES]
     for choice in PALETTE_CHOICES:
         evaluation = EVALUATION_COLORS[choice.color_id]
         assert evaluation.color_id == choice.color_id

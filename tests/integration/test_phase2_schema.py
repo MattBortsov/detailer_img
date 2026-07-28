@@ -84,9 +84,7 @@ def test_metadata_contains_only_two_metadata_tables() -> None:
         for column in table.columns
     }
     assert not any(
-        fragment in column
-        for column in all_columns
-        for fragment in forbidden_fragments
+        fragment in column for column in all_columns for fragment in forbidden_fragments
     )
 
 
@@ -120,9 +118,7 @@ async def test_schema_enforces_session_digest_and_expiry_contracts(
 ) -> None:
     async with database_engine.begin() as connection:
         await connection.execute(
-            MiniAppSession.__table__.insert().values(
-                **mini_app_session_values()
-            )
+            MiniAppSession.__table__.insert().values(**mini_app_session_values())
         )
 
     with pytest.raises(IntegrityError):
@@ -177,9 +173,7 @@ def test_integration_harness_rejects_unsafe_database_targets() -> None:
     with pytest.raises(ValueError):
         validate_test_database_url("sqlite:///car_wrap_test.db")
     with pytest.raises(ValueError):
-        validate_test_database_url(
-            "postgresql+psycopg://user:pass@db/car_wrap"
-        )
+        validate_test_database_url("postgresql+psycopg://user:pass@db/car_wrap")
 
 
 def alembic_config(test_database_url: str) -> Config:
@@ -197,19 +191,16 @@ def inspect_schema(sync_connection: object) -> dict[str, object]:
             column["name"] for column in schema.get_columns("active_sources")
         },
         "session_columns": {
-            column["name"]
-            for column in schema.get_columns("mini_app_sessions")
+            column["name"] for column in schema.get_columns("mini_app_sessions")
         },
         "active_checks": {
             item["name"] for item in schema.get_check_constraints("active_sources")
         },
         "session_checks": {
-            item["name"]
-            for item in schema.get_check_constraints("mini_app_sessions")
+            item["name"] for item in schema.get_check_constraints("mini_app_sessions")
         },
         "session_uniques": {
-            item["name"]
-            for item in schema.get_unique_constraints("mini_app_sessions")
+            item["name"] for item in schema.get_unique_constraints("mini_app_sessions")
         },
     }
 
@@ -240,9 +231,7 @@ def test_alembic_upgrade_downgrade_upgrade_parity(
 
         command.downgrade(config, "base")
         with engine.connect() as connection:
-            assert set(inspect(connection).get_table_names()) <= {
-                "alembic_version"
-            }
+            assert set(inspect(connection).get_table_names()) <= {"alembic_version"}
         command.upgrade(config, "head")
     finally:
         engine.dispose()
