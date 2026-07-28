@@ -1,17 +1,46 @@
+/**
+ * Card interaction adapted from Kokonut UI Card Flip by @dorianbaffier.
+ * MIT License. Vanilla implementation: explicit flip, back, and select actions.
+ */
 import {
+  activateMode,
   authenticationFailed,
   beginSubmission,
   completeSubmission,
+  completeUpload,
   createAppState,
+  loadAdminQueue,
+  loadCustomCatalog,
+  loadOwnerColors,
   loadPalette,
   paletteFailed,
+  resetUpload,
   selectChoice,
+  setCatalogLoading,
+  setFlipped,
+  startUpload,
+  updateUploadProgress,
 } from "./state.js";
 
 const HEX_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const BOT_URL_PATTERN = /^https:\/\/t\.me\/[A-Za-z][A-Za-z0-9_]{4,31}$/;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+const ACCEPTED_UPLOAD_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+]);
+const STATUS_COPY = Object.freeze({
+  pending: "На проверке",
+  needs_review: "Нужна проверка администратора",
+  rejected: "Цвет не опубликован",
+  approved: "Опубликован",
+  hidden: "Скрыт",
+});
 
 const elements = {
   loading: document.querySelector("#loading-state"),
@@ -20,7 +49,10 @@ const elements = {
   authFailed: document.querySelector("#auth-failed-state"),
   paletteFailed: document.querySelector("#palette-failed-state"),
   form: document.querySelector("#palette-form"),
-  grid: document.querySelector("#palette-grid"),
+  colorsGrid: document.querySelector("#colors-grid"),
+  userColorsGrid: document.querySelector("#user-colors-grid"),
+  userColorsEmpty: document.querySelector("#user-colors-empty"),
+  colorsCount: document.querySelector("#colors-count"),
   choiceTemplate: document.querySelector("#choice-template"),
   privacy: document.querySelector("#privacy-copy"),
   announcement: document.querySelector("#selection-status"),
@@ -28,10 +60,31 @@ const elements = {
   actionHint: document.querySelector("#action-hint"),
   submit: document.querySelector("#submit-button"),
   retry: document.querySelector("#retry-palette"),
+  loadMore: document.querySelector("#load-more-colors"),
+  mineList: document.querySelector("#mine-list"),
+  adminPanel: document.querySelector("#admin-panel"),
+  adminList: document.querySelector("#admin-list"),
+  surprise: document.querySelector("#select-surprise"),
+  addDialog: document.querySelector("#add-color-dialog"),
+  addForm: document.querySelector("#add-color-form"),
+  openAdd: document.querySelector("#open-add-color"),
+  closeAdd: document.querySelector("#close-add-color"),
+  imageInput: document.querySelector("#color-image"),
+  replaceImage: document.querySelector("#replace-color-image"),
+  uploadPreview: document.querySelector("#upload-preview"),
+  uploadPreviewImage: document.querySelector("#upload-preview-image"),
+  nameInput: document.querySelector("#color-name"),
+  nameCounter: document.querySelector("#color-name-counter"),
+  uploadProgress: document.querySelector("#upload-progress"),
+  uploadMessage: document.querySelector("#upload-message"),
+  dialogAlert: document.querySelector("#dialog-alert"),
+  uploadSubmit: document.querySelector("#upload-submit"),
 };
 
 let state = createAppState();
 let sessionExchangeAttempted = false;
+let catalogLoaded = false;
+let previewObjectUrl = null;
 const telegram = window.Telegram?.WebApp;
 
 function exactKeys(value, expected) {
@@ -46,7 +99,7 @@ function exactKeys(value, expected) {
   );
 }
 
-function validChoice(choice) {
+function validChoice(choice, allowCustom = false) {
   if (
     !exactKeys(choice, ["color_id", "name", "display_hex", "kind"]) ||
     typeof choice.color_id !== "string" ||
@@ -61,6 +114,9 @@ function validChoice(choice) {
       HEX_PATTERN.test(choice.display_hex)
     );
   }
+  if (choice.kind === "custom") {
+    return allowCustom && choice.display_hex === null;
+  }
   return choice.kind === "surprise" && choice.display_hex === null;
 }
 
@@ -74,6 +130,7 @@ function validPaletteState(payload) {
       "bot_chat_url",
       "privacy_text",
       "session_expires_at",
+      "is_admin",
     ]) ||
     typeof payload.palette_version !== "string" ||
     !Array.isArray(payload.choices) ||
@@ -81,6 +138,7 @@ function validPaletteState(payload) {
     typeof payload.source_ready !== "boolean" ||
     typeof payload.privacy_text !== "string" ||
     typeof payload.session_expires_at !== "string" ||
+    typeof payload.is_admin !== "boolean" ||
     !BOT_URL_PATTERN.test(payload.bot_chat_url)
   ) {
     return false;
@@ -108,7 +166,7 @@ function validSelectionResponse(payload, selectedId) {
     exactKeys(payload, ["status", "palette_version", "choice"]) &&
     payload.status === "validated" &&
     typeof payload.palette_version === "string" &&
-    validChoice(payload.choice) &&
+    validChoice(payload.choice, true) &&
     payload.choice.color_id === selectedId
   );
 }
@@ -125,32 +183,169 @@ function showOnly(active) {
   }
   const heading = active.querySelector("h1");
   if (heading && active !== elements.loading) {
-    heading.focus({ preventScroll: true });
+    heading.focus({preventScroll: true});
   }
 }
 
-function renderChoices() {
-  elements.grid.replaceChildren();
-  for (const choice of state.choices) {
-    const fragment = elements.choiceTemplate.content.cloneNode(true);
-    const input = fragment.querySelector(".choice-input");
-    const label = fragment.querySelector(".choice-card");
-    const swatch = fragment.querySelector(".swatch");
-    const name = fragment.querySelector(".choice-name");
-    const inputId = `choice-${choice.color_id}`;
-    input.id = inputId;
-    input.value = choice.color_id;
-    input.checked = choice.color_id === state.selectedId;
-    input.disabled = state.inFlight;
-    label.htmlFor = inputId;
-    name.textContent = choice.name;
-    if (choice.kind === "color") {
-      swatch.style.setProperty("--swatch-color", choice.display_hex);
-    } else {
-      swatch.textContent = "✦";
-    }
-    elements.grid.append(fragment);
+function publicCard(item, kind) {
+  if (kind === "color") {
+    return {
+      id: item.color_id,
+      name: item.name,
+      kindLabel: "Палитра",
+      displayHex: item.display_hex,
+      previewUrl: null,
+    };
   }
+  return {
+    id: item.selection_id,
+    name: item.name,
+    kindLabel: "User Color",
+    displayHex: null,
+    previewUrl: item.preview_url,
+  };
+}
+
+function cardButton(root, selector) {
+  const button = root.querySelector(selector);
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error("Invalid card template");
+  }
+  return button;
+}
+
+function renderCard(item) {
+  const fragment = elements.choiceTemplate.content.cloneNode(true);
+  const card = fragment.querySelector(".palette-card");
+  const front = fragment.querySelector(".card-front");
+  const back = fragment.querySelector(".card-back");
+  const swatch = fragment.querySelector(".swatch-field");
+  const image = fragment.querySelector(".reference-image");
+  const flip = cardButton(fragment, ".flip-button");
+  const select = cardButton(fragment, ".select-button");
+  const flipped = state.flippedId === item.id;
+  const selected = state.selectedId === item.id;
+
+  card.dataset.colorId = item.id;
+  card.dataset.flipped = String(flipped);
+  card.dataset.selected = String(selected);
+  flip.dataset.action = "flip";
+  flip.dataset.colorId = item.id;
+  flip.ariaExpanded = String(flipped);
+  flip.ariaLabel = `Подробнее о цвете ${item.name}`;
+  select.dataset.action = "select";
+  select.dataset.colorId = item.id;
+  select.ariaPressed = String(selected);
+  select.textContent = selected ? "Выбрано" : "Выбрать";
+  cardButton(fragment, ".back-button").dataset.action = "back";
+  cardButton(fragment, ".back-button").dataset.colorId = item.id;
+
+  for (const name of fragment.querySelectorAll(".card-name")) {
+    name.textContent = item.name;
+  }
+  for (const kind of fragment.querySelectorAll(".card-kind")) {
+    kind.textContent = item.kindLabel;
+  }
+  if (item.previewUrl) {
+    image.src = item.previewUrl;
+    image.alt = `Образец цвета ${item.name}`;
+    image.hidden = false;
+    swatch.hidden = true;
+  } else {
+    swatch.style.setProperty("--swatch-color", item.displayHex);
+  }
+  front.ariaHidden = String(flipped);
+  back.ariaHidden = String(!flipped);
+  back.inert = !flipped;
+  front.inert = flipped;
+  return fragment;
+}
+
+function renderCards() {
+  elements.colorsGrid.replaceChildren(
+    ...state.colors.map((item) => renderCard(publicCard(item, "color"))),
+  );
+  elements.userColorsGrid.replaceChildren(
+    ...state.customColors.map((item) => renderCard(publicCard(item, "custom"))),
+  );
+  elements.colorsCount.textContent = `${state.colors.length} цветов`;
+  elements.userColorsEmpty.hidden =
+    state.catalogLoading || state.customColors.length > 0;
+  elements.loadMore.hidden =
+    state.catalogLoading || state.catalogCursor === null;
+  elements.loadMore.disabled = state.catalogLoading;
+}
+
+function statusItem(item, admin = false) {
+  const row = document.createElement("div");
+  row.className = "management-item";
+  const copy = document.createElement("div");
+  const name = document.createElement("strong");
+  const status = document.createElement("p");
+  const actions = document.createElement("div");
+  name.textContent = item.name;
+  status.textContent = STATUS_COPY[item.status] ?? item.status;
+  actions.className = "management-actions";
+  copy.append(name, status);
+  row.append(copy, actions);
+
+  const actionNames = admin
+    ? [
+        ["approve", "Одобрить", ""],
+        ["reject", "Отклонить", "danger"],
+        ["delete", "Удалить", "danger"],
+      ]
+    : [
+        ["rename", "Переименовать", ""],
+        ["delete", "Удалить цвет", "danger"],
+      ];
+  for (const [action, label, className] of actionNames) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.managementAction = action;
+    button.dataset.colorId = item.id;
+    button.textContent = label;
+    button.className = className;
+    actions.append(button);
+  }
+  return row;
+}
+
+function renderManagement() {
+  elements.mineList.replaceChildren(
+    ...state.ownerColors.map((item) => statusItem(item)),
+  );
+  elements.adminPanel.hidden = !state.isAdmin;
+  elements.adminList.replaceChildren(
+    ...state.adminQueue.map((item) => statusItem(item, true)),
+  );
+}
+
+function renderMode() {
+  for (const tab of document.querySelectorAll('[role="tab"]')) {
+    const active = tab.dataset.mode === state.mode;
+    tab.ariaSelected = String(active);
+    tab.tabIndex = active ? 0 : -1;
+  }
+  for (const panel of document.querySelectorAll('[role="tabpanel"]')) {
+    panel.hidden = panel.dataset.panel !== state.mode;
+  }
+}
+
+function renderUpload() {
+  const uploading = state.uploadState === "uploading";
+  elements.uploadSubmit.disabled = uploading;
+  elements.imageInput.disabled = uploading;
+  elements.nameInput.disabled = uploading;
+  elements.uploadProgress.hidden =
+    !uploading || state.uploadProgress === null;
+  if (state.uploadProgress !== null) {
+    elements.uploadProgress.value = state.uploadProgress;
+  }
+  elements.uploadMessage.textContent = state.uploadMessage;
+  elements.dialogAlert.hidden = state.uploadState !== "failed";
+  elements.dialogAlert.textContent =
+    state.uploadState === "failed" ? state.uploadMessage : "";
 }
 
 function render() {
@@ -171,8 +366,11 @@ function render() {
     return;
   }
   showOnly(elements.ready);
-  renderChoices();
-  elements.form.setAttribute("aria-busy", String(state.inFlight));
+  renderMode();
+  renderCards();
+  renderManagement();
+  renderUpload();
+  elements.form.ariaBusy = String(state.inFlight);
   elements.privacy.textContent = state.privacyText;
   elements.announcement.textContent = state.announcement;
   elements.submit.textContent = state.inFlight
@@ -180,28 +378,17 @@ function render() {
     : state.actionLabel;
   elements.submit.disabled = !state.actionEnabled || state.inFlight;
   elements.actionHint.textContent =
-    state.selectedId === null ? "Выберите один вариант" : "";
+    state.selectedId === null ? "Выберите один вариант" : "Цвет выбран";
   elements.alert.hidden = ![
     "selection_stale",
     "submit_failed",
   ].includes(state.view);
   elements.alert.textContent =
     state.view === "selection_stale"
-      ? "Этот цвет больше недоступен. Палитра обновлена — выберите другой."
+      ? "Этот цвет больше недоступен. Выберите другой."
       : state.view === "submit_failed"
         ? "Не удалось подтвердить выбор. Попробуйте ещё раз."
         : "";
-}
-
-function applyTelegramTheme() {
-  const scheme = telegram?.colorScheme === "dark" ? "dark" : "light";
-  document.documentElement.style.colorScheme = scheme;
-  if (telegram?.setHeaderColor) {
-    telegram.setHeaderColor("bg_color");
-  }
-  if (telegram?.setBottomBarColor) {
-    telegram.setBottomBarColor("bottom_bar_bg_color");
-  }
 }
 
 function trustedBotUrl(candidate) {
@@ -222,6 +409,16 @@ function openChat() {
   }
 }
 
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, {credentials: "include", ...options});
+  if (response.status === 401) {
+    state = authenticationFailed(state);
+    render();
+    throw new Error("Unauthorized");
+  }
+  return response;
+}
+
 async function exchangeSession() {
   if (sessionExchangeAttempted || !telegram) {
     return false;
@@ -236,7 +433,7 @@ async function exchangeSession() {
     const response = await fetch("/api/v1/tma/session", {
       method: "POST",
       credentials: "include",
-      headers: { Authorization: `tma ${launchEvidence}` },
+      headers: {Authorization: `tma ${launchEvidence}`},
     });
     if (!response.ok) {
       state = authenticationFailed(
@@ -253,14 +450,7 @@ async function exchangeSession() {
 
 async function fetchPalette() {
   try {
-    const response = await fetch("/api/v1/palette-state", {
-      credentials: "include",
-    });
-    if (response.status === 401) {
-      state = authenticationFailed(state);
-      render();
-      return;
-    }
+    const response = await fetchJson("/api/v1/palette-state");
     if (!response.ok) {
       state = paletteFailed(state);
       render();
@@ -277,9 +467,91 @@ async function fetchPalette() {
       sourceReady: payload.source_ready,
       botChatUrl: payload.bot_chat_url,
       privacyText: payload.privacy_text,
+      isAdmin: payload.is_admin,
     });
   } catch {
-    state = paletteFailed(state);
+    if (state.view !== "auth_failed") {
+      state = paletteFailed(state);
+    }
+  }
+  render();
+}
+
+function validCatalog(payload) {
+  return (
+    exactKeys(payload, ["items", "next_cursor"]) &&
+    Array.isArray(payload.items) &&
+    payload.items.every(
+      (item) =>
+        exactKeys(item, [
+          "selection_id",
+          "name",
+          "version",
+          "preview_url",
+          "approved_at",
+        ]) &&
+        typeof item.selection_id === "string" &&
+        typeof item.name === "string" &&
+        Number.isInteger(item.version) &&
+        item.version > 0 &&
+        typeof item.preview_url === "string" &&
+        item.preview_url.startsWith("/api/v1/custom-colors/") &&
+        typeof item.approved_at === "string",
+    ) &&
+    (payload.next_cursor === null || typeof payload.next_cursor === "string")
+  );
+}
+
+async function fetchCatalog(append = false) {
+  state = setCatalogLoading(state, true);
+  render();
+  const suffix =
+    append && state.catalogCursor
+      ? `?cursor=${encodeURIComponent(state.catalogCursor)}`
+      : "";
+  try {
+    const response = await fetchJson(`/api/v1/custom-colors${suffix}`);
+    const payload = await response.json();
+    if (!response.ok || !validCatalog(payload)) {
+      throw new Error("Invalid catalog");
+    }
+    state = loadCustomCatalog(state, {
+      items: payload.items,
+      nextCursor: payload.next_cursor,
+      append,
+    });
+    catalogLoaded = true;
+  } catch {
+    state = setCatalogLoading(state, false);
+  }
+  render();
+}
+
+async function fetchOwnerColors() {
+  try {
+    const response = await fetchJson("/api/v1/custom-colors/mine");
+    const payload = await response.json();
+    if (response.ok && Array.isArray(payload.items)) {
+      state = loadOwnerColors(state, payload.items);
+    }
+  } catch {
+    return;
+  }
+  render();
+}
+
+async function fetchAdminQueue() {
+  if (!state.isAdmin) {
+    return;
+  }
+  try {
+    const response = await fetchJson("/api/v1/custom-colors/admin/review");
+    const payload = await response.json();
+    if (response.ok && Array.isArray(payload.items)) {
+      state = loadAdminQueue(state, payload.items);
+    }
+  } catch {
+    return;
   }
   render();
 }
@@ -293,14 +565,78 @@ async function bootstrap() {
   await fetchPalette();
 }
 
-elements.form.addEventListener("change", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLInputElement) || target.name !== "color_id") {
+function findCardButton(colorId, selector) {
+  return [...document.querySelectorAll(selector)].find(
+    (button) => button.dataset.colorId === colorId,
+  );
+}
+
+function handleCardAction(event) {
+  const button = event.target.closest("[data-action]");
+  if (!(button instanceof HTMLButtonElement)) {
     return;
   }
-  state = selectChoice(state, target.value);
-  telegram?.HapticFeedback?.selectionChanged();
+  const colorId = button.dataset.colorId;
+  if (!colorId) {
+    return;
+  }
+  if (button.dataset.action === "select") {
+    state = selectChoice(state, colorId);
+    telegram?.HapticFeedback?.selectionChanged();
+    render();
+    return;
+  }
+  const opening = button.dataset.action === "flip";
+  state = setFlipped(state, colorId);
   render();
+  const target = findCardButton(
+    colorId,
+    opening ? ".back-button" : ".flip-button",
+  );
+  target?.focus({preventScroll: true});
+}
+
+for (const grid of [elements.colorsGrid, elements.userColorsGrid]) {
+  grid.addEventListener("click", handleCardAction);
+}
+
+for (const tab of document.querySelectorAll('[role="tab"]')) {
+  tab.addEventListener("click", async () => {
+    state = activateMode(state, tab.dataset.mode);
+    render();
+    if (state.mode === "users" && !catalogLoaded) {
+      await Promise.all([
+        fetchCatalog(),
+        fetchOwnerColors(),
+        fetchAdminQueue(),
+      ]);
+    }
+  });
+  tab.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+      return;
+    }
+    event.preventDefault();
+    const tabs = [...document.querySelectorAll('[role="tab"]')];
+    const current = tabs.indexOf(event.currentTarget);
+    const next =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? tabs.length - 1
+          : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) %
+            tabs.length;
+    tabs[next].focus();
+    tabs[next].click();
+  });
+}
+
+elements.surprise.addEventListener("click", () => {
+  if (state.surprise) {
+    state = selectChoice(state, state.surprise.color_id);
+    telegram?.HapticFeedback?.selectionChanged();
+    render();
+  }
 });
 
 elements.form.addEventListener("submit", async (event) => {
@@ -317,21 +653,16 @@ elements.form.addEventListener("submit", async (event) => {
     return;
   }
   try {
-    const response = await fetch("/api/v1/palette-selection/validate", {
+    const response = await fetchJson("/api/v1/palette-selection/validate", {
       method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
         color_id: state.selectedId,
         client_submission_uuid: state.submissionUuid,
       }),
     });
-    if (response.status === 401) {
-      state = completeSubmission(state, "auth_failed");
-    } else if (response.status === 409) {
+    if (response.status === 409) {
       state = completeSubmission(state, "stale");
-      await fetchPalette();
-      return;
     } else if (response.ok) {
       const payload = await response.json();
       state = completeSubmission(
@@ -344,31 +675,192 @@ elements.form.addEventListener("submit", async (event) => {
       state = completeSubmission(state, "failed");
     }
   } catch {
-    state = completeSubmission(state, "failed");
+    if (state.view !== "auth_failed") {
+      state = completeSubmission(state, "failed");
+    }
   }
   render();
 });
 
+function revokePreview() {
+  if (previewObjectUrl !== null) {
+    URL.revokeObjectURL(previewObjectUrl);
+    previewObjectUrl = null;
+  }
+}
+
+function openAddDialog() {
+  revokePreview();
+  elements.addForm.reset();
+  elements.uploadPreview.hidden = true;
+  elements.nameCounter.textContent = "0/40";
+  state = resetUpload(state);
+  elements.addDialog.showModal();
+  telegram?.BackButton?.show();
+  elements.nameInput.focus();
+  renderUpload();
+}
+
+function closeAddDialog() {
+  elements.addDialog.close();
+  telegram?.BackButton?.hide();
+  elements.openAdd.focus({preventScroll: true});
+}
+
+elements.openAdd.addEventListener("click", openAddDialog);
+elements.closeAdd.addEventListener("click", closeAddDialog);
+elements.addDialog.addEventListener("cancel", () => {
+  telegram?.BackButton?.hide();
+  elements.openAdd.focus({preventScroll: true});
+});
+telegram?.BackButton?.onClick?.(() => {
+  if (elements.addDialog.open) {
+    closeAddDialog();
+  }
+});
+
+elements.imageInput.addEventListener("change", () => {
+  revokePreview();
+  const file = elements.imageInput.files?.[0];
+  if (!file) {
+    elements.uploadPreview.hidden = true;
+    return;
+  }
+  if (
+    file.size > MAX_UPLOAD_BYTES ||
+    (file.type && !ACCEPTED_UPLOAD_TYPES.has(file.type))
+  ) {
+    elements.imageInput.value = "";
+    elements.dialogAlert.hidden = false;
+    elements.dialogAlert.textContent =
+      "Не удалось обработать изображение. Выберите другое фото в поддерживаемом формате.";
+    return;
+  }
+  previewObjectUrl = URL.createObjectURL(file);
+  elements.uploadPreviewImage.src = previewObjectUrl;
+  elements.uploadPreview.hidden = false;
+  elements.dialogAlert.hidden = true;
+});
+
+elements.replaceImage.addEventListener("click", () => elements.imageInput.click());
+elements.nameInput.addEventListener("input", () => {
+  elements.nameCounter.textContent = `${elements.nameInput.value.length}/40`;
+});
+
+function uploadColor(formData) {
+  return new Promise((resolve) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", "/api/v1/custom-colors");
+    request.withCredentials = true;
+    request.setRequestHeader("Idempotency-Key", crypto.randomUUID());
+    request.upload.addEventListener("progress", (event) => {
+      state = updateUploadProgress(
+        state,
+        event.lengthComputable ? Math.round((event.loaded / event.total) * 100) : null,
+      );
+      renderUpload();
+    });
+    request.addEventListener("load", () => resolve(request.status === 202));
+    request.addEventListener("error", () => resolve(false));
+    request.send(formData);
+  });
+}
+
+elements.addForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const file = elements.imageInput.files?.[0];
+  const name = elements.nameInput.value.trim();
+  if (!file || name.length < 1 || name.length > 40) {
+    elements.dialogAlert.hidden = false;
+    elements.dialogAlert.textContent = "Добавьте одно фото и название цвета.";
+    return;
+  }
+  const formData = new FormData();
+  formData.append("name", name);
+  formData.append("image", file, file.name);
+  state = startUpload(state);
+  renderUpload();
+  state = completeUpload(state, (await uploadColor(formData)) ? "accepted" : "failed");
+  renderUpload();
+  if (state.uploadState === "pending") {
+    await fetchOwnerColors();
+  }
+});
+
+elements.mineList.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-management-action]");
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+  const colorId = button.dataset.colorId;
+  const action = button.dataset.managementAction;
+  if (!colorId || !action) {
+    return;
+  }
+  if (action === "rename") {
+    const name = window.prompt("Новое название цвета");
+    if (!name) {
+      return;
+    }
+    await fetchJson(`/api/v1/custom-colors/${encodeURIComponent(colorId)}`, {
+      method: "PATCH",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({name}),
+    });
+  } else if (
+    window.confirm(
+      "Удалить цвет? Он сразу исчезнет из каталога и станет недоступен для новых запросов.",
+    )
+  ) {
+    await fetchJson(`/api/v1/custom-colors/${encodeURIComponent(colorId)}`, {
+      method: "DELETE",
+    });
+  }
+  await Promise.all([fetchOwnerColors(), fetchCatalog()]);
+});
+
+elements.adminList.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-management-action]");
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+  const colorId = button.dataset.colorId;
+  const action = button.dataset.managementAction;
+  if (!colorId || !action) {
+    return;
+  }
+  const reason =
+    action === "approve" ? null : window.prompt("Причина действия")?.slice(0, 200);
+  if (action !== "approve" && !reason) {
+    return;
+  }
+  await fetchJson(
+    `/api/v1/custom-colors/admin/${encodeURIComponent(colorId)}/${action}`,
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({reason}),
+    },
+  );
+  await Promise.all([fetchAdminQueue(), fetchCatalog()]);
+});
+
+elements.loadMore.addEventListener("click", () => fetchCatalog(true));
+elements.retry.addEventListener("click", fetchPalette);
 for (const button of document.querySelectorAll("[data-open-chat]")) {
   button.addEventListener("click", openChat);
 }
-elements.retry.addEventListener("click", fetchPalette);
 
 if (telegram) {
+  telegram.setHeaderColor?.("#07080D");
+  telegram.setBottomBarColor?.("#171C29");
   telegram.ready();
   telegram.expand();
   telegram.enableVerticalSwipes?.();
-  applyTelegramTheme();
-  for (const eventName of [
-    "themeChanged",
-    "safeAreaChanged",
-    "contentSafeAreaChanged",
-    "viewportChanged",
-  ]) {
-    telegram.onEvent?.(eventName, applyTelegramTheme);
-  }
   void bootstrap();
 } else {
   state = authenticationFailed(state);
   render();
 }
+
+window.addEventListener("pagehide", revokePreview, {once: true});

@@ -20,13 +20,14 @@ NOW = datetime(2026, 7, 28, 10, 30, tzinfo=UTC)
 SUBMISSION_ID = "6db32e02-9371-450c-851f-f187bea635d5"
 
 
-def settings() -> AppSettings:
+def settings(*, admin_ids: tuple[int, ...] = ()) -> AppSettings:
     return AppSettings.model_validate(
         {
             "database_url": "postgresql+psycopg://user:pass@db/test",
             "bot_token": "token",
             "bot_username": "CarWrapBot",
             "mini_app_url": "https://wrap.example.com/app",
+            "admin_telegram_user_ids": admin_ids,
         }
     )
 
@@ -78,10 +79,14 @@ class FakeSessions:
         return SessionContext(self.session)
 
 
-def build_app(active_source: ActiveSource | None) -> tuple[Any, FakeSessions]:
+def build_app(
+    active_source: ActiveSource | None,
+    *,
+    admin_ids: tuple[int, ...] = (),
+) -> tuple[Any, FakeSessions]:
     sessions = FakeSessions(active_source)
     app = create_app(
-        settings=settings(),
+        settings=settings(admin_ids=admin_ids),
         session_factory=sessions,
         clock=lambda: NOW,
     )
@@ -108,6 +113,7 @@ async def test_palette_state_exposes_only_safe_ordered_owner_state() -> None:
     assert payload["source_ready"] is True
     assert payload["source_message_id"] == 77
     assert payload["bot_chat_url"] == "https://t.me/CarWrapBot"
+    assert payload["is_admin"] is False
     assert payload["privacy_text"] == (
         "Приложение не сохраняет файлы изображений. Telegram и AI-провайдер "
         "обрабатывают фото для создания визуализации."
@@ -148,6 +154,20 @@ async def test_palette_state_exposes_only_safe_ordered_owner_state() -> None:
     ):
         assert forbidden not in rendered
     assert sessions.session.scalar_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_palette_state_marks_configured_admin_without_exposing_identity() -> None:
+    app, _ = build_app(source(), admin_ids=(1001,))
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.get("/api/v1/palette-state")
+
+    assert response.status_code == 200
+    assert response.json()["is_admin"] is True
+    assert "telegram_user_id" not in response.text
 
 
 @pytest.mark.asyncio

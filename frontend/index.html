@@ -6,117 +6,271 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     >
-    <title>Выбор цвета</title>
+    <title>CarWrap — выбор цвета</title>
     <link rel="stylesheet" href="./app.css">
-    <script
-      src="https://telegram.org/js/telegram-web-app.js"
-      defer
-    ></script>
+    <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
     <script type="module" src="./app.js"></script>
   </head>
   <body>
+    <div class="ambient ambient-cyan" aria-hidden="true"></div>
+    <div class="ambient ambient-violet" aria-hidden="true"></div>
+
     <main class="app-shell" id="app">
-      <section class="loading-state" id="loading-state" aria-labelledby="loading-title">
-        <div class="status-icon spinner" aria-hidden="true"></div>
+      <section class="center-state" id="loading-state" aria-labelledby="loading-title">
+        <div class="spinner" aria-hidden="true"></div>
         <h1 id="loading-title" tabindex="-1">Проверяем сессию</h1>
         <p role="status" aria-live="polite">Загружаем палитру…</p>
       </section>
 
       <section id="ready-state" hidden>
         <header class="page-header">
+          <p class="eyebrow">CARWRAP STUDIO</p>
           <h1>Выберите цвет</h1>
           <p>Цвет применится ко всем видимым окрашенным частям авто.</p>
         </header>
 
         <section class="readiness-panel" aria-labelledby="ready-title">
-          <svg
-            class="status-icon"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path d="M5 12.5 9.5 17 19 7.5"></path>
-          </svg>
+          <span class="status-mark" aria-hidden="true">✓</span>
           <div>
             <h2 id="ready-title">Фото готово</h2>
             <p>Используем последнее принятое фото из чата.</p>
           </div>
         </section>
 
+        <div class="mode-tabs" role="tablist" aria-label="Режим выбора цвета">
+          <button
+            type="button"
+            role="tab"
+            id="colors-tab"
+            data-mode="colors"
+            aria-controls="colors-panel"
+            aria-selected="true"
+            tabindex="0"
+          >Colors</button>
+          <button
+            type="button"
+            role="tab"
+            id="users-tab"
+            data-mode="users"
+            aria-controls="users-panel"
+            aria-selected="false"
+            tabindex="-1"
+          >User Colors</button>
+          <button
+            type="button"
+            role="tab"
+            id="surprise-tab"
+            data-mode="surprise"
+            aria-controls="surprise-panel"
+            aria-selected="false"
+            tabindex="-1"
+          >Surprise</button>
+        </div>
+
         <form id="palette-form" novalidate>
-          <fieldset>
-            <legend>Палитра</legend>
-            <div class="palette-grid" id="palette-grid"></div>
-          </fieldset>
+          <section
+            class="mode-panel"
+            id="colors-panel"
+            role="tabpanel"
+            aria-labelledby="colors-tab"
+            data-panel="colors"
+          >
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">БАЗОВАЯ ПАЛИТРА</p>
+                <h2>Colors</h2>
+              </div>
+              <span class="section-count" id="colors-count"></span>
+            </div>
+            <div class="palette-grid" id="colors-grid"></div>
+          </section>
+
+          <section
+            class="mode-panel"
+            id="users-panel"
+            role="tabpanel"
+            aria-labelledby="users-tab"
+            data-panel="users"
+            hidden
+          >
+            <div class="section-heading section-heading-action">
+              <div>
+                <p class="eyebrow">СООБЩЕСТВО</p>
+                <h2>User Colors</h2>
+                <p>Цвета, добавленные пользователями и прошедшие проверку.</p>
+              </div>
+              <button class="secondary-button" id="open-add-color" type="button">
+                Добавить свой цвет
+              </button>
+            </div>
+            <div class="palette-grid" id="user-colors-grid"></div>
+            <div class="empty-state" id="user-colors-empty" hidden>
+              <h3>Пока нет пользовательских цветов</h3>
+              <p>Добавьте первый образец плёнки — он появится здесь после проверки.</p>
+            </div>
+            <button class="more-button" id="load-more-colors" type="button" hidden>
+              Показать ещё
+            </button>
+
+            <details class="management-panel" id="mine-panel">
+              <summary>Мои цвета</summary>
+              <div class="management-list" id="mine-list"></div>
+            </details>
+
+            <details class="management-panel admin-panel" id="admin-panel" hidden>
+              <summary>На проверке</summary>
+              <p class="admin-warning">
+                Изображения скрыты до намеренного просмотра администратором.
+              </p>
+              <div class="management-list" id="admin-list"></div>
+            </details>
+          </section>
+
+          <section
+            class="mode-panel"
+            id="surprise-panel"
+            role="tabpanel"
+            aria-labelledby="surprise-tab"
+            data-panel="surprise"
+            hidden
+          >
+            <div class="surprise-hero">
+              <div class="surprise-orbit" aria-hidden="true">
+                <span>✦</span>
+              </div>
+              <p class="eyebrow">AI CURATION</p>
+              <h2>Доверьте выбор ИИ</h2>
+              <p>
+                ИИ подберёт стильный цвет, подходящий автомобилю и сцене.
+                Геометрия и детали автомобиля должны остаться без изменений.
+              </p>
+              <button class="select-surprise" id="select-surprise" type="button">
+                Выбрать Surprise
+              </button>
+            </div>
+          </section>
+
           <p class="privacy-copy" id="privacy-copy"></p>
-          <p class="selection-status" id="selection-status" aria-live="polite"></p>
+          <p class="selection-status" id="selection-status" role="status" aria-live="polite"></p>
           <div class="inline-alert" id="inline-alert" role="alert" hidden></div>
+
           <div class="action-bar">
             <p id="action-hint">Выберите один вариант</p>
             <button id="submit-button" type="submit" disabled>
               Оклеить авто в этот цвет
             </button>
+            <button class="chat-button" type="button" data-open-chat>
+              Открыть чат
+            </button>
           </div>
         </form>
       </section>
 
-      <section
-        class="recovery-state"
-        id="no-source-state"
-        aria-labelledby="no-source-title"
-        hidden
-      >
-        <h1 id="no-source-title" tabindex="-1">Сначала отправьте фото</h1>
-        <p>
-          Отправьте в чат фото автомобиля или мотоцикла, затем снова
-          откройте палитру.
-        </p>
+      <section class="center-state" id="no-source-state" hidden>
+        <h1 tabindex="-1">Сначала отправьте фото</h1>
+        <p>Отправьте в чат фото автомобиля или мотоцикла и откройте палитру снова.</p>
         <button type="button" data-open-chat>Открыть чат</button>
       </section>
 
-      <section
-        class="recovery-state"
-        id="auth-failed-state"
-        aria-labelledby="auth-failed-title"
-        hidden
-      >
-        <h1 id="auth-failed-title" tabindex="-1">Сессия истекла</h1>
+      <section class="center-state" id="auth-failed-state" hidden>
+        <h1 tabindex="-1">Сессия истекла</h1>
         <p>Откройте палитру заново из последнего сообщения бота.</p>
         <button type="button" data-open-chat>Открыть чат</button>
       </section>
 
-      <section
-        class="recovery-state"
-        id="palette-failed-state"
-        aria-labelledby="palette-failed-title"
-        hidden
-      >
-        <h1 id="palette-failed-title" tabindex="-1">
-          Не удалось загрузить палитру
-        </h1>
+      <section class="center-state" id="palette-failed-state" hidden>
+        <h1 tabindex="-1">Не удалось загрузить палитру</h1>
         <p>Проверьте подключение и попробуйте ещё раз.</p>
-        <button type="button" id="retry-palette">
-          Загрузить палитру снова
-        </button>
+        <button type="button" id="retry-palette">Загрузить палитру снова</button>
       </section>
     </main>
 
+    <dialog class="add-color-dialog" id="add-color-dialog" aria-labelledby="add-color-title">
+      <form id="add-color-form" method="dialog">
+        <header class="dialog-header">
+          <div>
+            <p class="eyebrow">USER COLOR</p>
+            <h2 id="add-color-title">Добавить свой цвет</h2>
+          </div>
+          <button class="icon-button" id="close-add-color" type="button" aria-label="Закрыть">×</button>
+        </header>
+
+        <div class="disclosure">
+          <p>Образец будет сохранён в вашем аккаунте и после проверки станет доступен другим пользователям.</p>
+          <p>Фото автомобиля и результат мы не сохраняем.</p>
+          <p>Изображение обработают сервис модерации и AI-провайдер.</p>
+        </div>
+
+        <div class="field">
+          <label for="color-image">Фото образца</label>
+          <p>JPEG, PNG, WebP или HEIC/HEIF · до 8 МБ</p>
+          <input
+            id="color-image"
+            name="image"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+            required
+          >
+          <div class="upload-preview" id="upload-preview" hidden>
+            <img id="upload-preview-image" alt="Предпросмотр образца цвета">
+            <button id="replace-color-image" type="button">Заменить фото</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label-row">
+            <label for="color-name">Название цвета</label>
+            <span id="color-name-counter">0/40</span>
+          </div>
+          <input id="color-name" name="name" type="text" maxlength="40" required>
+        </div>
+
+        <progress id="upload-progress" max="100" value="0" hidden></progress>
+        <p class="upload-message" id="upload-message" role="status" aria-live="polite"></p>
+        <div class="dialog-alert" id="dialog-alert" role="alert" hidden></div>
+        <button class="upload-submit" id="upload-submit" type="submit">
+          Отправить на проверку
+        </button>
+      </form>
+    </dialog>
+
     <template id="choice-template">
-      <div class="choice">
-        <input
-          class="visually-hidden choice-input"
-          type="radio"
-          name="color_id"
-        >
-        <label class="choice-card">
-          <span class="swatch" aria-hidden="true"></span>
-          <span class="choice-name"></span>
-          <span class="choice-check" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path d="M5 12.5 9.5 17 19 7.5"></path>
-            </svg>
-          </span>
-        </label>
-      </div>
+      <article class="palette-card" data-flipped="false" data-selected="false">
+        <div class="card-inner">
+          <div class="card-face card-front">
+            <div class="card-visual" aria-hidden="true">
+              <span class="swatch-field"></span>
+              <img class="reference-image" alt="" hidden>
+            </div>
+            <button
+              class="flip-button"
+              type="button"
+              aria-expanded="false"
+              aria-label="Подробнее о цвете"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 7h-5V2M4 17h5v5M5.8 9A7 7 0 0 1 17 5l3 2M18.2 15A7 7 0 0 1 7 19l-3-2"></path>
+              </svg>
+            </button>
+            <span class="selected-badge" aria-hidden="true">✓</span>
+            <div class="card-caption">
+              <strong class="card-name"></strong>
+              <span class="card-kind"></span>
+            </div>
+          </div>
+          <div class="card-face card-back" aria-hidden="true" inert>
+            <button class="back-button" type="button">Назад</button>
+            <div>
+              <p class="card-kind"></p>
+              <h3 class="card-name"></h3>
+              <p>Цвет на экране может отличаться от реальной плёнки.</p>
+            </div>
+            <button class="select-button" type="button" aria-pressed="false">
+              Выбрать
+            </button>
+          </div>
+        </div>
+      </article>
     </template>
   </body>
 </html>

@@ -9,6 +9,7 @@ import {
   createAppState,
   loadCustomCatalog,
   loadPalette,
+  resetUpload,
   selectChoice,
   setFlipped,
   startUpload,
@@ -103,12 +104,17 @@ test("upload states expose progress without moderation ETA", () => {
   const uploading = startUpload(createAppState());
   const pending = completeUpload(uploading, "accepted");
   const failed = completeUpload(uploading, "failed");
+  const reset = resetUpload(failed);
 
   assert.equal(uploading.uploadState, "uploading");
   assert.equal(uploading.uploadProgress, null);
   assert.equal(pending.uploadState, "pending");
   assert.equal(pending.uploadMessage, "Цвет отправлен на проверку");
   assert.equal(failed.uploadState, "failed");
+  assert.equal(reset.uploadState, "idle");
+  assert.equal(reset.uploadMessage, "");
+  assert.equal(Object.isFrozen(reset), true);
+  assert.equal(Object.isFrozen(reset.customColors), true);
 });
 
 test("submission keeps one UUID and stale selections reset safely", () => {

@@ -106,7 +106,7 @@ def test_dark_premium_tokens_and_media_safety() -> None:
 
 
 def test_add_color_sheet_has_exact_disclosure_and_iphone_formats() -> None:
-    html, _, _, parser = sources()
+    _, _, _, parser = sources()
     visible = " ".join(parser.text)
     file_inputs = [
         attrs

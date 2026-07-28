@@ -104,6 +104,7 @@ async def palette_state(
         bot_chat_url=f"https://t.me/{settings.bot_username}",
         privacy_text=PRIVACY_TEXT,
         session_expires_at=current.expires_at,
+        is_admin=current.telegram_user_id in settings.admin_telegram_user_ids,
     )
 
 

@@ -31,6 +31,7 @@ class PaletteStateOut(StrictApiModel):
     bot_chat_url: str
     privacy_text: str
     session_expires_at: datetime
+    is_admin: bool
 
 
 class SelectionValidationIn(StrictApiModel):
