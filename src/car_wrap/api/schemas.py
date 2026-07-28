@@ -20,7 +20,7 @@ class PaletteChoiceOut(StrictApiModel):
         default=None,
         pattern=r"^#[0-9A-F]{6}$",
     )
-    kind: Literal["color", "surprise"]
+    kind: Literal["color", "custom", "surprise"]
 
 
 class PaletteStateOut(StrictApiModel):
@@ -42,3 +42,17 @@ class SelectionValidationOut(StrictApiModel):
     status: Literal["validated"]
     palette_version: str
     choice: PaletteChoiceOut
+
+
+class CustomColorMutationIn(StrictApiModel):
+    name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=40,
+        pattern=r"^[^\x00-\x1f\x7f]*$",
+    )
+    reason: str | None = Field(
+        default=None,
+        max_length=200,
+        pattern=r"^[^\x00-\x1f\x7f]*$",
+    )

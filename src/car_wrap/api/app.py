@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from car_wrap.api.custom_colors import router as custom_colors_router
 from car_wrap.api.routes.palette import router as palette_router
 from car_wrap.api.routes.session import router as session_router
 from car_wrap.config import AppSettings
@@ -36,6 +37,9 @@ def create_app(
     session_factory: async_sessionmaker[AsyncSession],
     clock: Callable[[], datetime] = utc_now,
     exchange_service: Callable[..., Any] = exchange_init_data,
+    custom_color_service: Any = None,
+    custom_color_storage: Any = None,
+    custom_color_repository: Any = None,
 ) -> FastAPI:
     """Build an app with explicit configuration and persistence boundaries."""
 
@@ -49,8 +53,12 @@ def create_app(
     app.state.session_factory = session_factory
     app.state.clock = clock
     app.state.exchange_service = exchange_service
+    app.state.custom_color_service = custom_color_service
+    app.state.custom_color_storage = custom_color_storage
+    app.state.custom_color_repository = custom_color_repository
     app.include_router(session_router)
     app.include_router(palette_router)
+    app.include_router(custom_colors_router)
 
     @app.middleware("http")
     async def security_policy(request: Request, call_next: Any) -> Any:
