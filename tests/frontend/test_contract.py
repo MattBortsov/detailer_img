@@ -1,4 +1,4 @@
-"""Static Mini App accessibility, copy, and privacy contract."""
+"""Static Mini App accessibility, copy, privacy, and visual contracts."""
 
 from __future__ import annotations
 
@@ -24,147 +24,148 @@ class ContractParser(HTMLParser):
         self.tags.append((tag, dict(attrs)))
 
     def handle_data(self, data: str) -> None:
-        stripped = data.strip()
-        if stripped:
+        if stripped := data.strip():
             self.text.append(stripped)
 
 
-def parse_contract() -> tuple[str, ContractParser]:
-    source = HTML_PATH.read_text(encoding="utf-8")
+def sources() -> tuple[str, str, str, ContractParser]:
+    html = HTML_PATH.read_text(encoding="utf-8")
     parser = ContractParser()
-    parser.feed(source)
-    return source, parser
-
-
-def test_semantic_shell_and_native_controls_exist() -> None:
-    source, parser = parse_contract()
-    tags = [tag for tag, _ in parser.tags]
-    inputs = [attrs for tag, attrs in parser.tags if tag == "input"]
-    buttons = [attrs for tag, attrs in parser.tags if tag == "button"]
-
-    assert "main" in tags
-    assert "h1" in tags
-    assert "h2" in tags
-    assert "fieldset" in tags
-    assert "legend" in tags
-    assert any(
-        item.get("type") == "radio" and item.get("name") == "color_id"
-        for item in inputs
+    parser.feed(html)
+    return (
+        html,
+        CSS_PATH.read_text(encoding="utf-8"),
+        APP_JS_PATH.read_text(encoding="utf-8"),
+        parser,
     )
-    assert all("checked" not in item for item in inputs)
-    assert any("disabled" in item for item in buttons)
-    assert 'role="status"' in source
-    assert 'aria-live="polite"' in source
-    assert 'role="alert"' in source
 
 
-def test_exact_safe_copy_and_external_assets() -> None:
-    source, parser = parse_contract()
-    visible = " ".join(parser.text)
-    for copy in (
-        "Выберите цвет",
-        "Цвет применится ко всем видимым окрашенным частям авто.",
-        "Палитра",
-        "Фото готово",
-        "Используем последнее принятое фото из чата.",
-        "Выберите один вариант",
-        "Открыть чат",
-        "Загрузить палитру снова",
-    ):
-        assert copy in visible
+def test_exact_three_mode_navigation_and_surprise_panel() -> None:
+    html, _, _, parser = sources()
+    tabs = [
+        attrs
+        for tag, attrs in parser.tags
+        if tag == "button" and attrs.get("role") == "tab"
+    ]
 
-    assert "<style" not in source
-    assert not any(
-        tag == "script" and attrs.get("src") is None for tag, attrs in parser.tags
-    )
-    scripts = [attrs.get("src") for tag, attrs in parser.tags if tag == "script"]
-    assert "https://telegram.org/js/telegram-web-app.js" in scripts
-    assert "./app.js" in scripts
-    assert 'href="./app.css"' in source
-
-
-def test_prohibited_controls_and_phase3_ui_are_absent() -> None:
-    source, parser = parse_contract()
-    input_types = {attrs.get("type") for tag, attrs in parser.tags if tag == "input"}
-    lowered = source.lower()
-
-    assert not {"file", "text", "color"} & input_types
-    for forbidden in (
-        "mask",
-        "canvas",
-        "preview",
-        "modal",
-        "dialog",
-        "textarea",
-        "запрос принят",
-        "результат придёт",
-        "queued",
-        "running",
-        "cancel",
-        "отмен",
-        "закрыть",
-    ):
-        assert forbidden not in lowered
-    for palette_id in (
-        "pearl-white",
-        "charcoal",
-        "deep-blue",
-        "warm-red",
-        "forest-green",
-        "copper",
-        "bright-yellow",
-        "violet",
-    ):
-        assert palette_id not in source
+    assert [item.get("data-mode") for item in tabs] == [
+        "colors",
+        "users",
+        "surprise",
+    ]
+    assert [item.get("aria-controls") for item in tabs] == [
+        "colors-panel",
+        "users-panel",
+        "surprise-panel",
+    ]
+    assert "Colors User Colors Surprise" in " ".join(parser.text)
+    assert 'role="tablist"' in html
+    assert 'id="surprise-panel"' in html
+    assert "Доверьте выбор ИИ" in html
+    assert "Выбрать Surprise" in html
+    assert 'data-kind="surprise"' not in html
 
 
-def test_css_matches_spacing_responsive_focus_and_motion_contract() -> None:
-    css = CSS_PATH.read_text(encoding="utf-8")
-    for required in (
-        "--space-xs: 4px",
-        "--space-sm: 8px",
-        "--space-md: 16px",
-        "--space-lg: 24px",
-        "--space-xl: 32px",
-        "--space-2xl: 48px",
-        "--space-3xl: 64px",
-        "min-height: 44px",
-        "min-height: 52px",
-        "min-height: 72px",
-        "position: sticky",
-        "var(--tg-viewport-stable-height, 100svh)",
-        "outline: 3px solid var(--color-accent)",
-        "outline: 2px solid var(--color-accent)",
-        "width: 24px",
-        "@media (max-width: 319px)",
-        "@media (min-width: 600px)",
-        "@media (min-width: 720px)",
+def test_flip_card_and_selection_controls_are_separate() -> None:
+    html, css, js, _ = sources()
+
+    assert "Kokonut UI Card Flip" in js
+    assert 'class="flip-button"' in html
+    assert 'class="select-button"' in html
+    assert 'class="back-button"' in html
+    assert 'aria-expanded="false"' in html
+    assert 'data-flipped="false"' in html
+    assert "backface-visibility: hidden" in css
+    assert "transform-style: preserve-3d" in css
+    assert "rotateY(180deg)" in css
+    assert "perspective: 1600px" in css
+    assert "aspect-ratio: 4 / 5" in css
+    assert ":hover" in css
+    assert ":hover .card-inner" not in css
+
+
+def test_dark_premium_tokens_and_media_safety() -> None:
+    _, css, js, _ = sources()
+    for token in (
+        "--color-bg: #07080d",
+        "--color-surface: #10141e",
+        "--color-elevated: #171c29",
+        "--color-text: #f7f9ff",
+        "--color-accent: #35f2ff",
+        "--color-violet: #9a6cff",
+        "--color-destructive: #ff5c7a",
+        "radial-gradient",
         "prefers-reduced-motion: reduce",
-        "grid-template-columns: repeat(2, minmax(0, 1fr))",
-        "grid-template-columns: repeat(4, minmax(0, 1fr))",
     ):
-        assert required in css
-    assert "position: fixed" not in css
-    assert "100vh" not in css
+        assert token in css.lower()
+
+    assert "filter:" not in css
     assert "backdrop-filter" not in css
+    assert "innerHTML" not in js
+    assert "textContent" in js
 
 
-def test_frontend_has_no_embedded_privileged_or_storage_values() -> None:
-    combined = HTML_PATH.read_text(encoding="utf-8") + (
-        APP_JS_PATH.read_text(encoding="utf-8") if APP_JS_PATH.exists() else ""
-    )
+def test_add_color_sheet_has_exact_disclosure_and_iphone_formats() -> None:
+    html, _, _, parser = sources()
+    visible = " ".join(parser.text)
+    file_inputs = [
+        attrs
+        for tag, attrs in parser.tags
+        if tag == "input" and attrs.get("type") == "file"
+    ]
+
+    assert "Добавить свой цвет" in visible
+    assert (
+        "Образец будет сохранён в вашем аккаунте и после проверки станет "
+        "доступен другим пользователям."
+    ) in visible
+    assert "Фото автомобиля и результат мы не сохраняем." in visible
+    assert "Изображение обработают сервис модерации и AI-провайдер." in visible
+    assert "JPEG, PNG, WebP или HEIC/HEIF · до 8 МБ" in visible
+    assert "Отправить на проверку" in visible
+    assert file_inputs == [
+        {
+            "id": "color-image",
+            "name": "image",
+            "type": "file",
+            "accept": (
+                "image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+            ),
+            "required": None,
+        }
+    ]
+
+
+def test_accessibility_responsive_and_privacy_boundaries() -> None:
+    html, css, js, parser = sources()
+    buttons = [attrs for tag, attrs in parser.tags if tag == "button"]
+    combined = html + js
+
+    assert 'role="status"' in html
+    assert 'aria-live="polite"' in html
+    assert 'role="alert"' in html
+    assert "min-height: 44px" in css
+    assert "min-width: 44px" in css
+    assert "outline: 3px solid var(--color-accent)" in css
+    assert "@media (max-width: 349px)" in css
+    assert "@media (min-width: 600px)" in css
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in css
+    assert "grid-template-columns: repeat(3, minmax(0, 1fr))" in css
+    assert any(item.get("disabled") is None for item in buttons)
+
     for forbidden in (
         "localStorage",
         "sessionStorage",
         "indexedDB",
         "initDataUnsafe",
         "document.cookie",
-        "innerHTML",
         "telegram_user_id",
         "chat_id",
         "file_id",
         "file_unique_id",
-        "image_url",
         "openrouter",
+        "react",
+        "tailwind",
+        "lucide",
     ):
-        assert forbidden not in combined
+        assert forbidden not in combined.lower()

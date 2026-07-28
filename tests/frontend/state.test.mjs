@@ -2,11 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  activateMode,
   beginSubmission,
   completeSubmission,
+  completeUpload,
   createAppState,
+  loadCustomCatalog,
   loadPalette,
   selectChoice,
+  setFlipped,
+  startUpload,
 } from "../../frontend/state.js";
 
 const choices = Object.freeze([
@@ -24,57 +29,89 @@ const choices = Object.freeze([
   }),
 ]);
 
-test("starts booting with no protected palette or selection", () => {
-  const state = createAppState();
-  assert.equal(state.view, "booting");
-  assert.deepEqual(state.choices, []);
-  assert.equal(state.selectedId, null);
-  assert.equal(state.submissionUuid, null);
-  assert.equal(state.inFlight, false);
+test("palette separates colors and Surprise into exact modes", () => {
+  const loaded = loadPalette(createAppState(), {
+    choices,
+    sourceReady: true,
+    botChatUrl: "https://t.me/CarWrapBot",
+    isAdmin: false,
+  });
+
+  assert.equal(loaded.mode, "colors");
+  assert.deepEqual(loaded.colors.map((item) => item.color_id), ["charcoal"]);
+  assert.equal(loaded.surprise.color_id, "surprise_me");
+  assert.equal(loaded.isAdmin, false);
+  assert.equal(loaded.selectedId, null);
 });
 
-test("loads authenticated palette with no default selection", () => {
+test("mode navigation and flip do not silently select a card", () => {
   const loaded = loadPalette(createAppState(), {
     choices,
     sourceReady: true,
     botChatUrl: "https://t.me/CarWrapBot",
   });
+  const users = activateMode(loaded, "users");
+  const flipped = setFlipped(users, "charcoal");
 
-  assert.equal(loaded.view, "ready_unselected");
-  assert.equal(loaded.selectedId, null);
-  assert.equal(loaded.actionLabel, "Оклеить авто в этот цвет");
-  assert.equal(loaded.actionEnabled, false);
+  assert.equal(users.mode, "users");
+  assert.equal(flipped.flippedId, "charcoal");
+  assert.equal(flipped.selectedId, null);
+  assert.equal(setFlipped(flipped, "charcoal").flippedId, null);
+  assert.equal(activateMode(loaded, "unknown"), loaded);
 });
 
-test("named and surprise selection are exclusive and change exact CTA", () => {
+test("community pagination preserves server order and deduplicates", () => {
+  const first = loadCustomCatalog(createAppState(), {
+    items: [
+      { selection_id: "custom:a:v1", name: "Newest", preview_url: "/one" },
+      { selection_id: "custom:b:v1", name: "Older", preview_url: "/two" },
+    ],
+    nextCursor: "next",
+  });
+  const second = loadCustomCatalog(first, {
+    items: [
+      { selection_id: "custom:b:v1", name: "Older", preview_url: "/two" },
+      { selection_id: "custom:c:v1", name: "Oldest", preview_url: "/three" },
+    ],
+    nextCursor: null,
+    append: true,
+  });
+
+  assert.deepEqual(
+    second.customColors.map((item) => item.name),
+    ["Newest", "Older", "Oldest"],
+  );
+  assert.equal(second.catalogCursor, null);
+});
+
+test("named and Surprise selections use distinct exact CTA copy", () => {
   const loaded = loadPalette(createAppState(), {
     choices,
     sourceReady: true,
     botChatUrl: "https://t.me/CarWrapBot",
   });
   const named = selectChoice(loaded, "charcoal");
-  const surprise = selectChoice(named, "surprise_me");
+  const surprise = selectChoice(activateMode(named, "surprise"), "surprise_me");
 
-  assert.equal(named.view, "ready_color");
-  assert.equal(named.selectedId, "charcoal");
   assert.equal(named.actionLabel, "Оклеить авто в этот цвет");
-  assert.equal(named.announcement, "Выбран цвет: Графитовый.");
-  assert.equal(surprise.view, "ready_surprise");
-  assert.equal(surprise.selectedId, "surprise_me");
+  assert.equal(named.selectedId, "charcoal");
   assert.equal(surprise.actionLabel, "Удивить меня");
-  assert.equal(surprise.announcement, "Выбран вариант: Удиви меня.");
+  assert.equal(surprise.selectedId, "surprise_me");
 });
 
-test("unknown choice cannot create a browser-side fallback", () => {
-  const loaded = loadPalette(createAppState(), {
-    choices,
-    sourceReady: true,
-    botChatUrl: "https://t.me/CarWrapBot",
-  });
-  assert.equal(selectChoice(loaded, "unknown"), loaded);
+test("upload states expose progress without moderation ETA", () => {
+  const uploading = startUpload(createAppState());
+  const pending = completeUpload(uploading, "accepted");
+  const failed = completeUpload(uploading, "failed");
+
+  assert.equal(uploading.uploadState, "uploading");
+  assert.equal(uploading.uploadProgress, null);
+  assert.equal(pending.uploadState, "pending");
+  assert.equal(pending.uploadMessage, "Цвет отправлен на проверку");
+  assert.equal(failed.uploadState, "failed");
 });
 
-test("first submit synchronously guards repeats and reuses retry UUID", () => {
+test("submission keeps one UUID and stale selections reset safely", () => {
   const selected = selectChoice(
     loadPalette(createAppState(), {
       choices,
@@ -87,56 +124,11 @@ test("first submit synchronously guards repeats and reuses retry UUID", () => {
   const repeated = beginSubmission(first.state, () => "uuid-two");
   const failed = completeSubmission(first.state, "failed");
   const retry = beginSubmission(failed, () => "uuid-three");
+  const stale = completeSubmission(first.state, "stale");
 
   assert.equal(first.shouldSubmit, true);
-  assert.equal(first.state.view, "submitting");
-  assert.equal(first.state.inFlight, true);
-  assert.equal(first.state.selectedId, "charcoal");
-  assert.equal(first.state.submissionUuid, "uuid-one");
   assert.equal(repeated.shouldSubmit, false);
-  assert.equal(repeated.state, first.state);
-  assert.equal(failed.view, "submit_failed");
-  assert.equal(failed.selectedId, "charcoal");
   assert.equal(retry.state.submissionUuid, "uuid-one");
-});
-
-test("successful validation restores selected state without acceptance state", () => {
-  const selected = selectChoice(
-    loadPalette(createAppState(), {
-      choices,
-      sourceReady: true,
-      botChatUrl: "https://t.me/CarWrapBot",
-    }),
-    "charcoal",
-  );
-  const pending = beginSubmission(selected, () => "uuid-one").state;
-  const complete = completeSubmission(pending, "validated");
-
-  assert.equal(complete.view, "ready_color");
-  assert.equal(complete.inFlight, false);
-  assert.equal(complete.selectedId, "charcoal");
-});
-
-test("stale selection clears choice while no-source and auth recover safely", () => {
-  const selected = selectChoice(
-    loadPalette(createAppState(), {
-      choices,
-      sourceReady: true,
-      botChatUrl: "https://t.me/CarWrapBot",
-    }),
-    "charcoal",
-  );
-  const pending = beginSubmission(selected, () => "uuid-one").state;
-  const stale = completeSubmission(pending, "stale");
-  const noSource = loadPalette(createAppState(), {
-    choices,
-    sourceReady: false,
-    botChatUrl: "https://t.me/CarWrapBot",
-  });
-
-  assert.equal(stale.view, "selection_stale");
   assert.equal(stale.selectedId, null);
   assert.equal(stale.actionEnabled, false);
-  assert.equal(noSource.view, "no_active_source");
-  assert.equal(noSource.choices.length, 0);
 });
