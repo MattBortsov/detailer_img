@@ -1,0 +1,143 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy tested main to Hetzner
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      DEPLOY_HOST: 89.167.101.93
+      DEPLOY_USER: root
+      DEPLOY_PORT: "22"
+      DEPLOY_PATH: /root/detailer_img
+      DEPLOY_SHA: >-
+        ${{ github.event_name == 'workflow_run' &&
+            github.event.workflow_run.head_sha ||
+            github.sha }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+
+    steps:
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          required=(
+            DEPLOY_HOST
+            DEPLOY_USER
+            DEPLOY_PORT
+            DEPLOY_PATH
+            DEPLOY_SHA
+            DEPLOY_SSH_KEY
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Required deployment setting is missing: $name"
+              exit 1
+            fi
+          done
+
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9.-]+$ ]] ||
+            { echo "DEPLOY_HOST has an invalid format"; exit 1; }
+          [[ "$DEPLOY_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] ||
+            { echo "DEPLOY_USER has an invalid format"; exit 1; }
+          [[ "$DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]] ||
+            { echo "DEPLOY_PORT has an invalid format"; exit 1; }
+          (( DEPLOY_PORT >= 1 && DEPLOY_PORT <= 65535 )) ||
+            { echo "DEPLOY_PORT is outside the valid range"; exit 1; }
+          [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]] ||
+            { echo "DEPLOY_PATH has an invalid format"; exit 1; }
+          [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+            { echo "DEPLOY_SHA is not a full commit SHA"; exit 1; }
+
+      - name: Prepare locked SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          install -m 600 /dev/null "$HOME/.ssh/detailer_img"
+          install -m 600 /dev/null "$HOME/.ssh/known_hosts"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/detailer_img"
+          printf '%s\n' \
+            '89.167.101.93 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINDGYVaVZZ80dAU58WGNLXII4Lo63OwasAxec1gbQWBo' \
+            > "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/detailer_img" >/dev/null
+          [[ -s "$HOME/.ssh/known_hosts" ]]
+
+      - name: Deploy exact tested revision
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh \
+            -p "$DEPLOY_PORT" \
+            -i "$HOME/.ssh/detailer_img" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "bash -s -- '$DEPLOY_PATH' '$DEPLOY_SHA'" <<'REMOTE'
+          set -Eeuo pipefail
+
+          deploy_path=$1
+          expected_sha=$2
+
+          [[ -d "$deploy_path/.git" ]] || {
+            echo "Deployment repository is not initialized at $deploy_path"
+            exit 1
+          }
+          cd "$deploy_path"
+
+          git fetch --prune origin main
+          actual_sha=$(git rev-parse origin/main)
+          [[ "$actual_sha" == "$expected_sha" ]] || {
+            echo "origin/main does not match the revision that passed CI"
+            exit 1
+          }
+
+          git reset --hard "$expected_sha"
+          [[ -s "$deploy_path/.env" ]] || {
+            echo "Application .env is missing on the server"
+            exit 1
+          }
+
+          if [[ -f compose.yaml ]]; then
+            compose_file=compose.yaml
+          elif [[ -f docker-compose.yml ]]; then
+            compose_file=docker-compose.yml
+          else
+            echo "Source synchronized; Docker Compose is not implemented yet"
+            exit 0
+          fi
+
+          docker compose -f "$compose_file" config --quiet
+          docker compose -f "$compose_file" pull
+          docker compose -f "$compose_file" build --pull
+          docker compose -f "$compose_file" up -d --remove-orphans
+          docker compose -f "$compose_file" ps
+          REMOTE

@@ -1,0 +1,83 @@
+schema_version: "1"
+corpus_id: feasibility-v1
+cases:
+  - case_id: car-front-light
+    source_path: cars/front-light.jpg
+    source_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    vehicle_type: car
+    viewpoint: front
+    source_tone: light
+    reflections: true
+    complex_background: false
+    partial_occlusion: false
+    color_id: deep-blue
+  - case_id: car-rear-dark
+    source_path: cars/rear-dark.jpg
+    source_sha256: "1111111111111111111111111111111111111111111111111111111111111111"
+    vehicle_type: car
+    viewpoint: rear
+    source_tone: dark
+    reflections: false
+    complex_background: true
+    partial_occlusion: false
+    color_id: warm-red
+  - case_id: car-side-light
+    source_path: cars/side-light.jpg
+    source_sha256: "2222222222222222222222222222222222222222222222222222222222222222"
+    vehicle_type: car
+    viewpoint: side
+    source_tone: light
+    reflections: false
+    complex_background: false
+    partial_occlusion: true
+    color_id: forest-green
+  - case_id: car-three-quarter-dark
+    source_path: cars/three-quarter-dark.jpg
+    source_sha256: "3333333333333333333333333333333333333333333333333333333333333333"
+    vehicle_type: car
+    viewpoint: three_quarter
+    source_tone: dark
+    reflections: true
+    complex_background: true
+    partial_occlusion: false
+    color_id: pearl-white
+  - case_id: motorcycle-front-dark
+    source_path: motorcycles/front-dark.jpg
+    source_sha256: "4444444444444444444444444444444444444444444444444444444444444444"
+    vehicle_type: motorcycle
+    viewpoint: front
+    source_tone: dark
+    reflections: true
+    complex_background: false
+    partial_occlusion: true
+    color_id: bright-yellow
+  - case_id: motorcycle-rear-light
+    source_path: motorcycles/rear-light.jpg
+    source_sha256: "5555555555555555555555555555555555555555555555555555555555555555"
+    vehicle_type: motorcycle
+    viewpoint: rear
+    source_tone: light
+    reflections: false
+    complex_background: true
+    partial_occlusion: false
+    color_id: charcoal
+  - case_id: motorcycle-side-dark
+    source_path: motorcycles/side-dark.jpg
+    source_sha256: "6666666666666666666666666666666666666666666666666666666666666666"
+    vehicle_type: motorcycle
+    viewpoint: side
+    source_tone: dark
+    reflections: true
+    complex_background: true
+    partial_occlusion: false
+    color_id: copper
+  - case_id: motorcycle-three-quarter-light
+    source_path: motorcycles/three-quarter-light.jpg
+    source_sha256: "7777777777777777777777777777777777777777777777777777777777777777"
+    vehicle_type: motorcycle
+    viewpoint: three_quarter
+    source_tone: light
+    reflections: false
+    complex_background: false
+    partial_occlusion: true
+    color_id: violet

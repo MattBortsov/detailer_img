@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Python 3.13 quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install project and development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --editable ".[dev]"
+
+      - name: Reject tracked secrets and image evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tracked_sensitive="$(
+            git ls-files |
+              grep -E '(^|/)\.env($|\.)|^eval/(fixtures|output|runs)/' |
+              grep -Ev '(^|/)\.env\.example$' || true
+          )"
+          if [[ -n "$tracked_sensitive" ]]; then
+            echo "Sensitive or generated files must not be tracked:"
+            printf '%s\n' "$tracked_sensitive"
+            exit 1
+          fi
+
+      - name: Ruff lint
+        run: python -m ruff check src tests
+
+      - name: Ruff format
+        run: python -m ruff format --check src tests
+
+      - name: Strict type check
+        run: python -m mypy src
+
+      - name: Test
+        env:
+          OPENROUTER_API_KEY: ""
+          TELEGRAM_BOT_TOKEN: ""
+        run: python -m pytest -q

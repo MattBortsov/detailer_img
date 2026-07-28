@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "car-wrap-bot"
+version = "0.1.0"
+description = "Privacy-preserving vehicle recoloring evaluation contracts"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "httpx==0.28.1",
+  "Pillow==12.3.0",
+  "pydantic==2.13.4",
+  "pydantic-settings==2.14.2",
+  "PyYAML==6.0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy==2.3.0",
+  "pytest==9.1.1",
+  "pytest-asyncio==1.4.0",
+  "ruff==0.16.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+packages = ["car_wrap"]
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = "yaml"
+ignore_missing_imports = true

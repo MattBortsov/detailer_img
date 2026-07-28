@@ -1,0 +1,13 @@
+schema_version: "1"
+minimum_scores:
+  vehicle_identity: 4
+  geometry_viewpoint: 4
+  target_coverage: 3
+  non_target_preservation: 4
+  lighting_material: 3
+  color_intent: 3
+  artifact_control: 3
+  telegram_usability: 3
+minimum_mean: 4.0
+minimum_case_pass_ratio: 0.8
+critical_failure_floor: 3
