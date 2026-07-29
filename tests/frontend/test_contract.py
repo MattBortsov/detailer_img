@@ -64,24 +64,76 @@ def test_exact_three_mode_navigation_and_surprise_panel() -> None:
     assert "Доверьте выбор ИИ" in html
     assert "Выбрать Surprise" in html
     assert 'data-kind="surprise"' not in html
+    assert "Разворачиваю веера" in " ".join(parser.text)
+    assert "Проверяем сессию" not in " ".join(parser.text)
 
 
-def test_flip_card_and_selection_controls_are_separate() -> None:
-    html, css, js, _ = sources()
+def test_native_card_surfaces_flip_without_coupling_selection() -> None:
+    html, css, js, parser = sources()
+    warning = "Цвет на экране может отличаться от реальной плёнки."
+    flip_surfaces = [
+        attrs
+        for tag, attrs in parser.tags
+        if tag == "button"
+        and "card-flip-surface" in (attrs.get("class") or "").split()
+    ]
 
     assert "Kokonut UI Card Flip" in js
-    assert 'class="flip-button"' in html
+    assert len(flip_surfaces) == 2
+    assert [surface.get("data-face") for surface in flip_surfaces] == [
+        "front",
+        "back",
+    ]
+    assert all(surface.get("type") == "button" for surface in flip_surfaces)
+    assert all(
+        surface.get("aria-expanded") == "false" for surface in flip_surfaces
+    )
     assert 'class="select-button"' in html
-    assert 'class="back-button"' in html
-    assert 'aria-expanded="false"' in html
+    assert 'class="flip-button"' not in html
+    assert 'class="back-button"' not in html
+    assert "<article class=\"palette-card\"" in html
+    assert 'role="button"' not in html
     assert 'data-flipped="false"' in html
+    assert 'class="card-face card-back" aria-hidden="true" inert' in html
+
+    assert html.count('class="card-circle"') == 10
+    assert 'class="floating-circles" aria-hidden="true"' in html
+    assert "@keyframes card-circle-float" in css
+    assert "animation-delay: calc(var(--circle-index) * 300ms)" in css
+    assert "top: 24%" in css
+    assert "left: 24%" in css
+    assert "var(--swatch-color)" in css
+
+    assert "grid.addEventListener(\"click\", handleCardAction)" in js
+    assert 'button.dataset.action === "select"' in js
+    assert 'button.dataset.action === "flip"' in js
+    assert 'grid.addEventListener("keydown"' not in js
+    assert "findCardSurface" in js
+
     assert "backface-visibility: hidden" in css
+    assert "-webkit-backface-visibility: hidden" in css
     assert "transform-style: preserve-3d" in css
+    assert "-webkit-transform-style: preserve-3d" in css
+    assert "-webkit-transform: rotateY(180deg)" in css
     assert "rotateY(180deg)" in css
+    assert "isolation: isolate" in css
     assert "perspective: 1600px" in css
     assert "aspect-ratio: 4 / 5" in css
     assert ":hover" in css
     assert ":hover .card-inner" not in css
+
+    assert "Палитра" not in html
+    assert '"Палитра"' not in js
+    assert html.count(warning) == 1
+    assert warning not in html.split('<template id="choice-template">', 1)[1]
+    assert html.index("</form>") < html.index(warning)
+
+    reduced_motion = css.split(
+        "@media (prefers-reduced-motion: reduce)", 1
+    )[1]
+    assert ".card-circle" in reduced_motion
+    assert "animation: none" in reduced_motion
+    assert "transition: none" in reduced_motion
 
 
 def test_dark_premium_tokens_and_media_safety() -> None:

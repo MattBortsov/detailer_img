@@ -33,7 +33,7 @@ NO_SOURCE_COPY = (
 UNSUPPORTED_MESSAGE_COPY = (
     "Нужна фотография автомобиля или мотоцикла. Отправьте фото или изображение файлом."
 )
-WINNING_SOURCE_COPY = "Это фото выбрано для оклейки. Теперь выберите цвет."
+WINNING_SOURCE_COPY = "Теперь выберите цвет."
 OLDER_SOURCE_COPY = "Фото принято, но для оклейки уже выбрано более новое фото."
 
 ActiveSourceSetter = Callable[..., Awaitable[ActiveSourceDecision]]
@@ -74,7 +74,7 @@ def rejection_copy(
         maximum_mb = settings.max_media_bytes / (1024 * 1024)
         return (
             f"Файл больше {_format_number(maximum_mb)} МБ. "
-            "Отправьте изображение меньшего размера."
+            "Отправьте изображение меньшего размера. Сжать бесплатно фото можно тут - https://www.iloveimg.com/ru/compress-image"
         )
     if rejection.code is MediaRejectionCode.DIMENSION_LIMIT:
         return (

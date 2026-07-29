@@ -18,7 +18,7 @@
     <main class="app-shell" id="app">
       <section class="center-state" id="loading-state" aria-labelledby="loading-title">
         <div class="spinner" aria-hidden="true"></div>
-        <h1 id="loading-title" tabindex="-1">Проверяем сессию</h1>
+        <h1 id="loading-title" tabindex="-1">Разворачиваю веера</h1>
         <p role="status" aria-live="polite">Загружаем палитру…</p>
       </section>
 
@@ -164,6 +164,7 @@
             </button>
           </div>
         </form>
+        <p class="film-warning">Цвет на экране может отличаться от реальной плёнки.</p>
       </section>
 
       <section class="center-state" id="no-source-state" hidden>
@@ -265,20 +266,29 @@
       <article class="palette-card" data-flipped="false" data-selected="false">
         <div class="card-inner">
           <div class="card-face card-front">
+            <button
+              class="card-flip-surface"
+              type="button"
+              data-face="front"
+              aria-expanded="false"
+              aria-label="Подробнее о цвете"
+            ></button>
             <div class="card-visual" aria-hidden="true">
               <span class="swatch-field"></span>
               <img class="reference-image" alt="" hidden>
             </div>
-            <button
-              class="flip-button"
-              type="button"
-              aria-expanded="false"
-              aria-label="Подробнее о цвете"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M20 7h-5V2M4 17h5v5M5.8 9A7 7 0 0 1 17 5l3 2M18.2 15A7 7 0 0 1 7 19l-3-2"></path>
-              </svg>
-            </button>
+            <div class="floating-circles" aria-hidden="true">
+              <span class="card-circle" style="--circle-index: 0"></span>
+              <span class="card-circle" style="--circle-index: 1"></span>
+              <span class="card-circle" style="--circle-index: 2"></span>
+              <span class="card-circle" style="--circle-index: 3"></span>
+              <span class="card-circle" style="--circle-index: 4"></span>
+              <span class="card-circle" style="--circle-index: 5"></span>
+              <span class="card-circle" style="--circle-index: 6"></span>
+              <span class="card-circle" style="--circle-index: 7"></span>
+              <span class="card-circle" style="--circle-index: 8"></span>
+              <span class="card-circle" style="--circle-index: 9"></span>
+            </div>
             <span class="selected-badge" aria-hidden="true">✓</span>
             <div class="card-caption">
               <strong class="card-name"></strong>
@@ -286,11 +296,16 @@
             </div>
           </div>
           <div class="card-face card-back" aria-hidden="true" inert>
-            <button class="back-button" type="button">Назад</button>
-            <div>
+            <button
+              class="card-flip-surface"
+              type="button"
+              data-face="back"
+              aria-expanded="false"
+              aria-label="Скрыть подробности о цвете"
+            ></button>
+            <div class="card-details">
               <p class="card-kind"></p>
               <h3 class="card-name"></h3>
-              <p>Цвет на экране может отличаться от реальной плёнки.</p>
             </div>
             <button class="select-button" type="button" aria-pressed="false">
               Выбрать

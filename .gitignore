@@ -14,10 +14,12 @@ build/
 *.egg-info/
 *.pyc
 eval/fixtures/
+eval/corpus.yaml
 eval/output/
 eval/runs/
 eval/scores*.yaml
 eval/*scores*.yaml
 eval/reports/
 eval/*.report.json
+examples/
 AGENTS.md

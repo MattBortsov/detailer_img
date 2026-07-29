@@ -1,6 +1,6 @@
 /**
  * Card interaction adapted from Kokonut UI Card Flip by @dorianbaffier.
- * MIT License. Vanilla implementation: explicit flip, back, and select actions.
+ * MIT License. Vanilla implementation: native face surfaces and select action.
  */
 import {
   activateMode,
@@ -196,7 +196,7 @@ function publicCard(item, kind) {
     return {
       id: item.color_id,
       name: item.name,
-      kindLabel: "Палитра",
+      kindLabel: "",
       displayHex: item.display_hex,
       previewUrl: null,
     };
@@ -225,7 +225,14 @@ function renderCard(item) {
   const back = fragment.querySelector(".card-back");
   const swatch = fragment.querySelector(".swatch-field");
   const image = fragment.querySelector(".reference-image");
-  const flip = cardButton(fragment, ".flip-button");
+  const frontSurface = cardButton(
+    fragment,
+    '.card-flip-surface[data-face="front"]',
+  );
+  const backSurface = cardButton(
+    fragment,
+    '.card-flip-surface[data-face="back"]',
+  );
   const select = cardButton(fragment, ".select-button");
   const flipped = state.flippedId === item.id;
   const selected = state.selectedId === item.id;
@@ -233,22 +240,24 @@ function renderCard(item) {
   card.dataset.colorId = item.id;
   card.dataset.flipped = String(flipped);
   card.dataset.selected = String(selected);
-  flip.dataset.action = "flip";
-  flip.dataset.colorId = item.id;
-  flip.ariaExpanded = String(flipped);
-  flip.ariaLabel = `Подробнее о цвете ${item.name}`;
+  for (const surface of [frontSurface, backSurface]) {
+    surface.dataset.action = "flip";
+    surface.dataset.colorId = item.id;
+    surface.ariaExpanded = String(flipped);
+  }
+  frontSurface.ariaLabel = `Подробнее о цвете ${item.name}`;
+  backSurface.ariaLabel = `Скрыть подробности о цвете ${item.name}`;
   select.dataset.action = "select";
   select.dataset.colorId = item.id;
   select.ariaPressed = String(selected);
   select.textContent = selected ? "Выбрано" : "Выбрать";
-  cardButton(fragment, ".back-button").dataset.action = "back";
-  cardButton(fragment, ".back-button").dataset.colorId = item.id;
 
   for (const name of fragment.querySelectorAll(".card-name")) {
     name.textContent = item.name;
   }
   for (const kind of fragment.querySelectorAll(".card-kind")) {
     kind.textContent = item.kindLabel;
+    kind.hidden = item.kindLabel.length === 0;
   }
   if (item.previewUrl) {
     image.src = item.previewUrl;
@@ -256,7 +265,7 @@ function renderCard(item) {
     image.hidden = false;
     swatch.hidden = true;
   } else {
-    swatch.style.setProperty("--swatch-color", item.displayHex);
+    card.style.setProperty("--swatch-color", item.displayHex);
   }
   front.ariaHidden = String(flipped);
   back.ariaHidden = String(!flipped);
@@ -609,6 +618,13 @@ function findCardButton(colorId, selector) {
   );
 }
 
+function findCardSurface(colorId, face) {
+  return findCardButton(
+    colorId,
+    `.card-flip-surface[data-face="${face}"]`,
+  );
+}
+
 function handleCardAction(event) {
   const button = event.target.closest("[data-action]");
   if (!(button instanceof HTMLButtonElement)) {
@@ -619,19 +635,22 @@ function handleCardAction(event) {
     return;
   }
   if (button.dataset.action === "select") {
+    const preserveFlip = state.flippedId === colorId;
     state = selectChoice(state, colorId);
+    if (preserveFlip) {
+      state = setFlipped(state, colorId);
+    }
     telegram?.HapticFeedback?.selectionChanged();
     render();
+    findCardButton(colorId, ".select-button")?.focus({preventScroll: true});
     return;
   }
-  const opening = button.dataset.action === "flip";
-  state = setFlipped(state, colorId);
-  render();
-  const target = findCardButton(
-    colorId,
-    opening ? ".back-button" : ".flip-button",
-  );
-  target?.focus({preventScroll: true});
+  if (button.dataset.action === "flip") {
+    const nextFace = button.dataset.face === "front" ? "back" : "front";
+    state = setFlipped(state, colorId);
+    render();
+    findCardSurface(colorId, nextFace)?.focus({preventScroll: true});
+  }
 }
 
 for (const grid of [elements.colorsGrid, elements.userColorsGrid]) {
