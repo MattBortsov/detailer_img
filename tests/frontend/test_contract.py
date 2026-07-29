@@ -74,8 +74,7 @@ def test_native_card_surfaces_flip_without_coupling_selection() -> None:
     flip_surfaces = [
         attrs
         for tag, attrs in parser.tags
-        if tag == "button"
-        and "card-flip-surface" in (attrs.get("class") or "").split()
+        if tag == "button" and "card-flip-surface" in (attrs.get("class") or "").split()
     ]
 
     assert "Kokonut UI Card Flip" in js
@@ -85,13 +84,11 @@ def test_native_card_surfaces_flip_without_coupling_selection() -> None:
         "back",
     ]
     assert all(surface.get("type") == "button" for surface in flip_surfaces)
-    assert all(
-        surface.get("aria-expanded") == "false" for surface in flip_surfaces
-    )
+    assert all(surface.get("aria-expanded") == "false" for surface in flip_surfaces)
     assert 'class="select-button"' in html
     assert 'class="flip-button"' not in html
     assert 'class="back-button"' not in html
-    assert "<article class=\"palette-card\"" in html
+    assert '<article class="palette-card"' in html
     assert 'role="button"' not in html
     assert 'data-flipped="false"' in html
     assert 'class="card-face card-back" aria-hidden="true" inert' in html
@@ -104,7 +101,7 @@ def test_native_card_surfaces_flip_without_coupling_selection() -> None:
     assert "left: 24%" in css
     assert "var(--swatch-color)" in css
 
-    assert "grid.addEventListener(\"click\", handleCardAction)" in js
+    assert 'grid.addEventListener("click", handleCardAction)' in js
     assert 'button.dataset.action === "select"' in js
     assert 'button.dataset.action === "flip"' in js
     assert 'grid.addEventListener("keydown"' not in js
@@ -128,9 +125,7 @@ def test_native_card_surfaces_flip_without_coupling_selection() -> None:
     assert warning not in html.split('<template id="choice-template">', 1)[1]
     assert html.index("</form>") < html.index(warning)
 
-    reduced_motion = css.split(
-        "@media (prefers-reduced-motion: reduce)", 1
-    )[1]
+    reduced_motion = css.split("@media (prefers-reduced-motion: reduce)", 1)[1]
     assert ".card-circle" in reduced_motion
     assert "animation: none" in reduced_motion
     assert "transition: none" in reduced_motion
