@@ -19,6 +19,7 @@ rollback() {
     compose config --quiet
     compose build
     compose up -d --remove-orphans
+    compose restart nginx
   fi
   exit "$exit_code"
 }
@@ -30,7 +31,9 @@ compose build --pull
 compose up -d --remove-orphans
 
 deadline=$((SECONDS + 660))
-for service in postgres redis clamav api nginx; do
+wait_for_service() {
+  local service="$1"
+  local container_id state
   container_id="$(compose ps -q "$service")"
   [[ -n "$container_id" ]] || fail "service did not start: $service"
   while true; do
@@ -42,7 +45,17 @@ for service in postgres redis clamav api nginx; do
     (( SECONDS < deadline )) || fail "service health timeout: $service"
     sleep 2
   done
+}
+
+for service in postgres redis clamav api; do
+  wait_for_service "$service"
 done
+
+# Nginx resolves the API container address when its worker starts. Recreate the
+# upstream connection after an application-image deployment changes that
+# container address.
+compose restart nginx
+wait_for_service nginx
 
 for service in api bot relay worker postgres redis nginx; do
   count="$(compose ps -q "$service" | awk 'NF {count++} END {print count+0}')"

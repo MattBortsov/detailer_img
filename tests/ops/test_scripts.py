@@ -79,6 +79,13 @@ def test_deploy_uses_exact_sha_and_scoped_rollback() -> None:
     assert 'reset --hard "$PREVIOUS_SHA"' in deploy
     assert "clean -fd" in deploy
     assert "git clean -fd" in workflow
+    assert deploy.count("compose restart nginx") == 2
+    assert deploy.index("for service in postgres redis clamav api") < deploy.rindex(
+        "compose restart nginx"
+    )
+    assert deploy.rindex("compose restart nginx") < deploy.index(
+        "wait_for_service nginx"
+    )
     assert "docker system prune" not in deploy
     assert "docker volume rm" not in deploy
 
