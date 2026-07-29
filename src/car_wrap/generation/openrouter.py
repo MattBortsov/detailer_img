@@ -71,5 +71,7 @@ def build_generation_payload(
     return {
         "model": model,
         "prompt": prompt,
+        "n": 1,
+        "resolution": "1K",
         "input_references": references,
     }

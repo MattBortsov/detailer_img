@@ -138,3 +138,55 @@ test("submission keeps one UUID and stale selections reset safely", () => {
   assert.equal(stale.selectedId, null);
   assert.equal(stale.actionEnabled, false);
 });
+
+test("durable acceptance is terminal and keeps the server chat URL", () => {
+  const selected = selectChoice(
+    loadPalette(createAppState(), {
+      choices,
+      sourceReady: true,
+      botChatUrl: "https://t.me/CarWrapBot",
+    }),
+    "charcoal",
+  );
+  const pending = beginSubmission(selected, () => "uuid-one").state;
+  const accepted = completeSubmission(
+    pending,
+    "accepted",
+    "https://t.me/ServerOwnedBot",
+  );
+
+  assert.equal(accepted.view, "accepted");
+  assert.equal(accepted.actionEnabled, false);
+  assert.equal(accepted.inFlight, false);
+  assert.equal(accepted.submissionUuid, "uuid-one");
+  assert.equal(accepted.botChatUrl, "https://t.me/ServerOwnedBot");
+  assert.equal(
+    accepted.announcement,
+    "Запрос принят. Результат придёт в чат с ботом.",
+  );
+});
+
+test("active and recent limits have stable truthful copy and remain retryable", () => {
+  const selected = selectChoice(
+    loadPalette(createAppState(), {
+      choices,
+      sourceReady: true,
+      botChatUrl: "https://t.me/CarWrapBot",
+    }),
+    "charcoal",
+  );
+  const pending = beginSubmission(selected, () => "uuid-one").state;
+  const active = completeSubmission(pending, "active_limit");
+  const recent = completeSubmission(pending, "recent_limit");
+
+  assert.equal(active.view, "submission_limited");
+  assert.equal(active.actionEnabled, true);
+  assert.equal(
+    active.submissionError,
+    "Дождитесь результата текущего запроса и попробуйте снова.",
+  );
+  assert.equal(
+    recent.submissionError,
+    "Слишком много запросов за короткое время. Попробуйте позже.",
+  );
+});

@@ -34,6 +34,8 @@ def test_custom_payload_orders_vehicle_then_color_reference() -> None:
     )
 
     assert payload["model"] == "x-ai/grok-imagine-image-quality"
+    assert payload["n"] == 1
+    assert payload["resolution"] == "1K"
     assert len(payload["input_references"]) == 2
     urls = [item["image_url"]["url"] for item in payload["input_references"]]
     assert urls[0].startswith("data:image/jpeg;base64,")

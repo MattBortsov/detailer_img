@@ -24,6 +24,8 @@ from car_wrap.custom_colors.repository import CustomColorRepository
 from car_wrap.custom_colors.service import CustomColorService
 from car_wrap.custom_colors.storage import FilesystemPrivateStorage
 from car_wrap.db.session import create_session_factory
+from car_wrap.jobs.repository import JobRepository
+from car_wrap.jobs.service import JobAcceptanceService
 
 
 def build_application() -> FastAPI:
@@ -36,6 +38,15 @@ def build_application() -> FastAPI:
         max_object_bytes=settings.custom_color_max_bytes,
     )
     repository = CustomColorRepository(quota=settings.custom_color_quota)
+    job_service = JobAcceptanceService(
+        repository=JobRepository(),
+        custom_colors=repository,
+        image_model=settings.openrouter_image_model,
+        prompt_revision=settings.generation_prompt_revision,
+        max_active=settings.job_max_active_per_user,
+        max_recent=settings.job_max_accepted_per_window,
+        window_seconds=settings.job_limit_window_seconds,
+    )
     scanner = ClamdInstreamScanner(
         settings.clamav_socket_path,
         max_bytes=settings.custom_color_max_bytes,
@@ -87,5 +98,6 @@ def build_application() -> FastAPI:
         custom_color_service=service,
         custom_color_storage=storage,
         custom_color_repository=repository,
+        job_acceptance_service=job_service,
         lifespan=lifespan,
     )

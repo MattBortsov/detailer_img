@@ -183,6 +183,33 @@
         <p>Проверьте подключение и попробуйте ещё раз.</p>
         <button type="button" id="retry-palette">Загрузить палитру снова</button>
       </section>
+
+      <section
+        class="accepted-state"
+        id="accepted-state"
+        role="status"
+        aria-labelledby="accepted-title"
+        hidden
+      >
+        <div class="accepted-sheet">
+          <button
+            class="accepted-close"
+            id="close-mini-app"
+            type="button"
+            aria-label="Закрыть Mini App"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 7l10 10M17 7 7 17"></path>
+            </svg>
+          </button>
+          <span class="accepted-mark" aria-hidden="true">✓</span>
+          <h1 id="accepted-title" tabindex="-1">Запрос принят</h1>
+          <p>Результат придёт в чат с ботом.</p>
+          <button class="accepted-chat" type="button" data-open-chat>
+            Открыть чат
+          </button>
+        </div>
+      </section>
     </main>
 
     <dialog class="add-color-dialog" id="add-color-dialog" aria-labelledby="add-color-title">

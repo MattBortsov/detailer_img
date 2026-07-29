@@ -16,6 +16,27 @@ def valid_environment() -> dict[str, str]:
         "TELEGRAM_BOT_TOKEN": "bot-token-canary",
         "TELEGRAM_BOT_USERNAME": "CarWrapBot",
         "MINI_APP_URL": "https://wrap.example.com/app",
+        "REDIS_URL": "rediss://:redis-canary@redis.example.com:6380/0",
+        "JOB_WAKEUP_CHANNEL": "car-wrap.jobs.test",
+        "JOB_RELAY_BATCH_SIZE": "50",
+        "JOB_RELAY_POLL_SECONDS": "2.5",
+        "JOB_MAX_ACTIVE_PER_USER": "1",
+        "JOB_MAX_ACCEPTED_PER_WINDOW": "10",
+        "JOB_LIMIT_WINDOW_SECONDS": "3600",
+        "JOB_WORKER_POLL_SECONDS": "2",
+        "JOB_LEASE_SECONDS": "300",
+        "JOB_HEARTBEAT_SECONDS": "30",
+        "OPENROUTER_IMAGE_MODEL": "x-ai/grok-imagine-image-quality",
+        "GENERATION_PROMPT_REVISION": "vehicle-wrap-v1",
+        "PROVIDER_MAX_OUTPUT_BYTES": "20971520",
+        "PROVIDER_MAX_IMAGE_SIDE_PX": "8192",
+        "PROVIDER_MAX_IMAGE_PIXELS": "25000000",
+        "TELEGRAM_RESULT_MAX_BYTES": "9437184",
+        "TELEGRAM_RESULT_MAX_SIDE_SUM": "10000",
+        "OPENROUTER_CONNECT_TIMEOUT_SECONDS": "10",
+        "OPENROUTER_READ_TIMEOUT_SECONDS": "180",
+        "OPENROUTER_WRITE_TIMEOUT_SECONDS": "30",
+        "OPENROUTER_POOL_TIMEOUT_SECONDS": "10",
         "SESSION_COOKIE_NAME": "__Host-car_wrap_session",
         "INIT_DATA_MAX_BYTES": "8192",
         "AUTH_MAX_AGE_SECONDS": "600",
@@ -58,6 +79,26 @@ def test_app_settings_load_only_explicit_environment_contract() -> None:
     assert settings.custom_color_max_bytes == 8 * 1024 * 1024
     assert settings.custom_color_quota == 20
     assert settings.admin_telegram_user_ids == (101, 202)
+    assert settings.job_wakeup_channel == "car-wrap.jobs.test"
+    assert settings.job_relay_batch_size == 50
+    assert settings.job_relay_poll_seconds == 2.5
+    assert settings.job_max_active_per_user == 1
+    assert settings.job_max_accepted_per_window == 10
+    assert settings.job_limit_window_seconds == 3600
+    assert settings.job_worker_poll_seconds == 2
+    assert settings.job_lease_seconds == 300
+    assert settings.job_heartbeat_seconds == 30
+    assert settings.provider_max_output_bytes == 20 * 1024 * 1024
+    assert settings.provider_max_image_side_px == 8192
+    assert settings.provider_max_image_pixels == 25_000_000
+    assert settings.telegram_result_max_bytes == 9 * 1024 * 1024
+    assert settings.telegram_result_max_side_sum == 10_000
+    assert settings.openrouter_connect_timeout_seconds == 10
+    assert settings.openrouter_read_timeout_seconds == 180
+    assert settings.openrouter_write_timeout_seconds == 30
+    assert settings.openrouter_pool_timeout_seconds == 10
+    assert settings.openrouter_image_model == "x-ai/grok-imagine-image-quality"
+    assert settings.generation_prompt_revision == "vehicle-wrap-v1"
     assert settings.model_config["frozen"] is True
     assert settings.model_config["extra"] == "forbid"
     with pytest.raises(ValidationError):
@@ -70,6 +111,27 @@ def test_app_settings_load_only_explicit_environment_contract() -> None:
         ("DATABASE_URL", "sqlite:///local.db"),
         ("DATABASE_URL", "postgresql://user:pass@db/app"),
         ("MINI_APP_URL", "http://wrap.example.com/app"),
+        ("REDIS_URL", "http://redis.example.com/0"),
+        ("JOB_WAKEUP_CHANNEL", "bad channel"),
+        ("JOB_RELAY_BATCH_SIZE", "0"),
+        ("JOB_RELAY_POLL_SECONDS", "0"),
+        ("JOB_MAX_ACTIVE_PER_USER", "0"),
+        ("JOB_MAX_ACCEPTED_PER_WINDOW", "0"),
+        ("JOB_LIMIT_WINDOW_SECONDS", "0"),
+        ("JOB_WORKER_POLL_SECONDS", "0"),
+        ("JOB_LEASE_SECONDS", "90"),
+        ("JOB_HEARTBEAT_SECONDS", "100"),
+        ("PROVIDER_MAX_OUTPUT_BYTES", "0"),
+        ("PROVIDER_MAX_IMAGE_SIDE_PX", "0"),
+        ("PROVIDER_MAX_IMAGE_PIXELS", "0"),
+        ("TELEGRAM_RESULT_MAX_BYTES", "10485761"),
+        ("TELEGRAM_RESULT_MAX_SIDE_SUM", "10001"),
+        ("OPENROUTER_CONNECT_TIMEOUT_SECONDS", "0"),
+        ("OPENROUTER_READ_TIMEOUT_SECONDS", "0"),
+        ("OPENROUTER_WRITE_TIMEOUT_SECONDS", "0"),
+        ("OPENROUTER_POOL_TIMEOUT_SECONDS", "0"),
+        ("OPENROUTER_IMAGE_MODEL", "bad model?"),
+        ("GENERATION_PROMPT_REVISION", "../prompt"),
         ("TELEGRAM_BOT_USERNAME", "@bad-name"),
         ("INIT_DATA_MAX_BYTES", "0"),
         ("AUTH_MAX_AGE_SECONDS", "0"),
@@ -107,6 +169,7 @@ def test_app_settings_redacts_credentials_in_all_common_outputs() -> None:
     for output in outputs:
         assert "bot-token-canary" not in output
         assert "database-canary" not in output
+        assert "redis-canary" not in output
         assert "must-not-be-read" not in output
 
 

@@ -45,6 +45,13 @@ class SelectionValidationOut(StrictApiModel):
     choice: PaletteChoiceOut
 
 
+class JobAcceptedOut(StrictApiModel):
+    job_id: UUID
+    status: Literal["queued"]
+    accepted: Literal[True]
+    bot_chat_url: str
+
+
 class CustomColorMutationIn(StrictApiModel):
     name: str | None = Field(
         default=None,

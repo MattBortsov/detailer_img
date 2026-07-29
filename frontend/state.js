@@ -36,6 +36,7 @@ export function createAppState() {
     uploadState: "idle",
     uploadProgress: null,
     uploadMessage: "",
+    submissionError: "",
   });
 }
 
@@ -204,13 +205,14 @@ export function beginSubmission(state, uuidFactory) {
       submissionUuid,
       inFlight: true,
       actionEnabled: false,
-      announcement: "Проверяем выбор.",
+      announcement: "Отправляем запрос.",
+      submissionError: "",
     }),
     shouldSubmit: true,
   });
 }
 
-export function completeSubmission(state, outcome) {
+export function completeSubmission(state, outcome, botChatUrl = null) {
   if (!state.inFlight) {
     return state;
   }
@@ -241,6 +243,30 @@ export function completeSubmission(state, outcome) {
       botChatUrl: state.botChatUrl,
     });
   }
+  if (outcome === "accepted") {
+    return freezeState({
+      ...state,
+      view: "accepted",
+      inFlight: false,
+      actionEnabled: false,
+      announcement: "Запрос принят. Результат придёт в чат с ботом.",
+      botChatUrl: botChatUrl ?? state.botChatUrl,
+      submissionError: "",
+    });
+  }
+  if (outcome === "active_limit" || outcome === "recent_limit") {
+    return freezeState({
+      ...state,
+      view: "submission_limited",
+      inFlight: false,
+      actionEnabled: true,
+      announcement: "",
+      submissionError:
+        outcome === "active_limit"
+          ? "Дождитесь результата текущего запроса и попробуйте снова."
+          : "Слишком много запросов за короткое время. Попробуйте позже.",
+    });
+  }
   const isSurprise = state.selectedId === state.surprise?.color_id;
   return freezeState({
     ...state,
@@ -253,6 +279,10 @@ export function completeSubmission(state, outcome) {
     inFlight: false,
     actionEnabled: true,
     announcement: "",
+    submissionError:
+      outcome === "validated"
+        ? ""
+        : "Не удалось отправить запрос. Попробуйте ещё раз.",
   });
 }
 

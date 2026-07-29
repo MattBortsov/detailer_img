@@ -15,6 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from car_wrap.api.custom_colors import router as custom_colors_router
+from car_wrap.api.routes.health import router as health_router
+from car_wrap.api.routes.jobs import router as jobs_router
 from car_wrap.api.routes.palette import router as palette_router
 from car_wrap.api.routes.session import router as session_router
 from car_wrap.config import AppSettings
@@ -40,6 +42,7 @@ def create_app(
     custom_color_service: Any = None,
     custom_color_storage: Any = None,
     custom_color_repository: Any = None,
+    job_acceptance_service: Any = None,
     lifespan: Any = None,
 ) -> FastAPI:
     """Build an app with explicit configuration and persistence boundaries."""
@@ -58,8 +61,11 @@ def create_app(
     app.state.custom_color_service = custom_color_service
     app.state.custom_color_storage = custom_color_storage
     app.state.custom_color_repository = custom_color_repository
+    app.state.job_acceptance_service = job_acceptance_service
+    app.include_router(health_router)
     app.include_router(session_router)
     app.include_router(palette_router)
+    app.include_router(jobs_router)
     app.include_router(custom_colors_router)
 
     @app.middleware("http")

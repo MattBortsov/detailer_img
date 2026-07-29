@@ -22,6 +22,8 @@ DEFAULT_OPENROUTER_IMAGE_MODEL = "x-ai/grok-imagine-image-quality"
 _MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")
 _BOT_USERNAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{3,27}[Bb][Oo][Tt]$")
 _COOKIE_NAME_PATTERN = re.compile(r"^(?:__Host-)?[A-Za-z0-9_-]{1,64}$")
+_CHANNEL_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,63}$")
+_REVISION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _SUPPORTED_DOCUMENT_MIME_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
 _CUSTOM_COLOR_MIME_TYPES = frozenset(
     {
@@ -47,6 +49,60 @@ class AppSettings(BaseModel):
     bot_token: SecretStr
     bot_username: str
     mini_app_url: str
+    redis_url: SecretStr = SecretStr("redis://redis:6379/0")
+    job_wakeup_channel: str = "car-wrap.jobs"
+    job_relay_batch_size: int = Field(default=50, strict=True, gt=0, le=1000)
+    job_relay_poll_seconds: float = Field(
+        default=2.0,
+        strict=True,
+        gt=0,
+        le=60,
+    )
+    job_max_active_per_user: int = Field(default=1, strict=True, gt=0, le=100)
+    job_max_accepted_per_window: int = Field(
+        default=10,
+        strict=True,
+        gt=0,
+        le=10_000,
+    )
+    job_limit_window_seconds: int = Field(
+        default=3600,
+        strict=True,
+        gt=0,
+        le=86_400,
+    )
+    job_worker_poll_seconds: float = Field(default=2.0, strict=True, gt=0, le=60)
+    job_lease_seconds: int = Field(default=300, strict=True, gt=0, le=3600)
+    job_heartbeat_seconds: int = Field(default=30, strict=True, gt=0, le=300)
+    openrouter_image_model: str = DEFAULT_OPENROUTER_IMAGE_MODEL
+    generation_prompt_revision: str = "vehicle-wrap-v1"
+    provider_max_output_bytes: int = Field(
+        default=20 * 1024 * 1024,
+        strict=True,
+        gt=0,
+    )
+    provider_max_image_side_px: int = Field(default=8192, strict=True, gt=0)
+    provider_max_image_pixels: int = Field(
+        default=25_000_000,
+        strict=True,
+        gt=0,
+    )
+    telegram_result_max_bytes: int = Field(
+        default=9 * 1024 * 1024,
+        strict=True,
+        gt=0,
+        le=10 * 1024 * 1024,
+    )
+    telegram_result_max_side_sum: int = Field(
+        default=10_000,
+        strict=True,
+        gt=0,
+        le=10_000,
+    )
+    openrouter_connect_timeout_seconds: float = Field(default=10.0, gt=0)
+    openrouter_read_timeout_seconds: float = Field(default=180.0, gt=0)
+    openrouter_write_timeout_seconds: float = Field(default=30.0, gt=0)
+    openrouter_pool_timeout_seconds: float = Field(default=10.0, gt=0)
     session_cookie_name: str = "car_wrap_session"
     init_data_max_bytes: int = Field(default=8192, strict=True, gt=0)
     auth_max_age_seconds: int = Field(default=600, strict=True, gt=0)
@@ -128,6 +184,33 @@ class AppSettings(BaseModel):
             raise ValueError("Mini App URL must be an HTTPS URL")
         return value
 
+    @field_validator("redis_url")
+    @classmethod
+    def validate_redis_url(cls, value: SecretStr) -> SecretStr:
+        parsed = urlsplit(value.get_secret_value())
+        if (
+            parsed.scheme not in {"redis", "rediss"}
+            or parsed.hostname is None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("Redis URL must use redis or rediss")
+        return value
+
+    @field_validator("job_wakeup_channel")
+    @classmethod
+    def validate_job_wakeup_channel(cls, value: str) -> str:
+        if not _CHANNEL_PATTERN.fullmatch(value):
+            raise ValueError("invalid job wake-up channel")
+        return value
+
+    @field_validator("generation_prompt_revision")
+    @classmethod
+    def validate_generation_prompt_revision(cls, value: str) -> str:
+        if not _REVISION_PATTERN.fullmatch(value):
+            raise ValueError("invalid generation prompt revision")
+        return value
+
     @field_validator("session_cookie_name")
     @classmethod
     def validate_cookie_name(cls, value: str) -> str:
@@ -170,7 +253,7 @@ class AppSettings(BaseModel):
             raise ValueError("private media paths must be absolute and narrow")
         return value
 
-    @field_validator("moderation_vision_model")
+    @field_validator("moderation_vision_model", "openrouter_image_model")
     @classmethod
     def validate_moderation_model(cls, value: str) -> str:
         if not _MODEL_NAME_PATTERN.fullmatch(value):
@@ -198,6 +281,8 @@ class AppSettings(BaseModel):
             raise ValueError("custom color references must be single-frame")
         if self.custom_color_output_long_edge_px > self.custom_color_max_side_px:
             raise ValueError("output edge must not exceed decode side limit")
+        if self.job_heartbeat_seconds * 3 >= self.job_lease_seconds:
+            raise ValueError("job heartbeat must be below one third of the lease")
         return self
 
     @classmethod
@@ -215,6 +300,10 @@ class AppSettings(BaseModel):
             "mini_app_url": source.get("MINI_APP_URL"),
         }
         string_fields = {
+            "REDIS_URL": "redis_url",
+            "JOB_WAKEUP_CHANNEL": "job_wakeup_channel",
+            "OPENROUTER_IMAGE_MODEL": "openrouter_image_model",
+            "GENERATION_PROMPT_REVISION": "generation_prompt_revision",
             "SESSION_COOKIE_NAME": "session_cookie_name",
             "CUSTOM_COLOR_STORAGE_ROOT": "custom_color_storage_root",
             "CLAMAV_SOCKET_PATH": "clamav_socket_path",
@@ -225,6 +314,12 @@ class AppSettings(BaseModel):
             "AUTH_MAX_AGE_SECONDS": "auth_max_age_seconds",
             "AUTH_FUTURE_SKEW_SECONDS": "auth_future_skew_seconds",
             "SESSION_TTL_SECONDS": "session_ttl_seconds",
+            "JOB_RELAY_BATCH_SIZE": "job_relay_batch_size",
+            "JOB_MAX_ACTIVE_PER_USER": "job_max_active_per_user",
+            "JOB_MAX_ACCEPTED_PER_WINDOW": "job_max_accepted_per_window",
+            "JOB_LIMIT_WINDOW_SECONDS": "job_limit_window_seconds",
+            "JOB_LEASE_SECONDS": "job_lease_seconds",
+            "JOB_HEARTBEAT_SECONDS": "job_heartbeat_seconds",
             "MAX_MEDIA_BYTES": "max_media_bytes",
             "MIN_SIDE_PX": "min_side_px",
             "MAX_SIDE_PX": "max_side_px",
@@ -238,6 +333,11 @@ class AppSettings(BaseModel):
                 "custom_color_decode_timeout_seconds"
             ),
             "CUSTOM_COLOR_QUOTA": "custom_color_quota",
+            "PROVIDER_MAX_OUTPUT_BYTES": "provider_max_output_bytes",
+            "PROVIDER_MAX_IMAGE_SIDE_PX": "provider_max_image_side_px",
+            "PROVIDER_MAX_IMAGE_PIXELS": "provider_max_image_pixels",
+            "TELEGRAM_RESULT_MAX_BYTES": "telegram_result_max_bytes",
+            "TELEGRAM_RESULT_MAX_SIDE_SUM": "telegram_result_max_side_sum",
         }
         for environment_name, field_name in string_fields.items():
             if environment_name in source:
@@ -245,6 +345,20 @@ class AppSettings(BaseModel):
         for environment_name, field_name in integer_fields.items():
             if environment_name in source:
                 values[field_name] = int(source[environment_name])
+        if "JOB_RELAY_POLL_SECONDS" in source:
+            values["job_relay_poll_seconds"] = float(source["JOB_RELAY_POLL_SECONDS"])
+        float_fields = {
+            "JOB_WORKER_POLL_SECONDS": "job_worker_poll_seconds",
+            "OPENROUTER_CONNECT_TIMEOUT_SECONDS": (
+                "openrouter_connect_timeout_seconds"
+            ),
+            "OPENROUTER_READ_TIMEOUT_SECONDS": "openrouter_read_timeout_seconds",
+            "OPENROUTER_WRITE_TIMEOUT_SECONDS": "openrouter_write_timeout_seconds",
+            "OPENROUTER_POOL_TIMEOUT_SECONDS": "openrouter_pool_timeout_seconds",
+        }
+        for environment_name, field_name in float_fields.items():
+            if environment_name in source:
+                values[field_name] = float(source[environment_name])
         if "DOCUMENT_MIME_ALLOWLIST" in source:
             values["document_mime_allowlist"] = tuple(
                 item.strip()

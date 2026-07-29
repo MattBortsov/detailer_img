@@ -48,6 +48,8 @@ const elements = {
   noSource: document.querySelector("#no-source-state"),
   authFailed: document.querySelector("#auth-failed-state"),
   paletteFailed: document.querySelector("#palette-failed-state"),
+  accepted: document.querySelector("#accepted-state"),
+  closeMiniApp: document.querySelector("#close-mini-app"),
   form: document.querySelector("#palette-form"),
   colorsGrid: document.querySelector("#colors-grid"),
   userColorsGrid: document.querySelector("#user-colors-grid"),
@@ -161,13 +163,14 @@ function validPaletteState(payload) {
   return true;
 }
 
-function validSelectionResponse(payload, selectedId) {
+function validAcceptedResponse(payload) {
   return (
-    exactKeys(payload, ["status", "palette_version", "choice"]) &&
-    payload.status === "validated" &&
-    typeof payload.palette_version === "string" &&
-    validChoice(payload.choice, true) &&
-    payload.choice.color_id === selectedId
+    exactKeys(payload, ["job_id", "status", "accepted", "bot_chat_url"]) &&
+    typeof payload.job_id === "string" &&
+    UUID_PATTERN.test(payload.job_id) &&
+    payload.status === "queued" &&
+    payload.accepted === true &&
+    BOT_URL_PATTERN.test(payload.bot_chat_url)
   );
 }
 
@@ -178,6 +181,7 @@ function showOnly(active) {
     elements.noSource,
     elements.authFailed,
     elements.paletteFailed,
+    elements.accepted,
   ]) {
     section.hidden = section !== active;
   }
@@ -376,6 +380,10 @@ function render() {
     showOnly(elements.paletteFailed);
     return;
   }
+  if (state.view === "accepted") {
+    showOnly(elements.accepted);
+    return;
+  }
   showOnly(elements.ready);
   renderMode();
   renderCards();
@@ -385,7 +393,7 @@ function render() {
   elements.privacy.textContent = state.privacyText;
   elements.announcement.textContent = state.announcement;
   elements.submit.textContent = state.inFlight
-    ? "Проверяем выбор…"
+    ? "Отправляем запрос…"
     : state.actionLabel;
   elements.submit.disabled = !state.actionEnabled || state.inFlight;
   elements.actionHint.textContent =
@@ -393,13 +401,12 @@ function render() {
   elements.alert.hidden = ![
     "selection_stale",
     "submit_failed",
+    "submission_limited",
   ].includes(state.view);
   elements.alert.textContent =
     state.view === "selection_stale"
       ? "Этот цвет больше недоступен. Выберите другой."
-      : state.view === "submit_failed"
-        ? "Не удалось подтвердить выбор. Попробуйте ещё раз."
-        : "";
+      : state.submissionError;
 }
 
 function trustedBotUrl(candidate) {
@@ -684,7 +691,7 @@ elements.form.addEventListener("submit", async (event) => {
     return;
   }
   try {
-    const response = await fetchJson("/api/v1/palette-selection/validate", {
+    const response = await fetchJson("/api/v1/jobs", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
@@ -692,16 +699,28 @@ elements.form.addEventListener("submit", async (event) => {
         client_submission_uuid: state.submissionUuid,
       }),
     });
-    if (response.status === 409) {
-      state = completeSubmission(state, "stale");
-    } else if (response.ok) {
+    if (response.status === 202) {
       const payload = await response.json();
+      const accepted = validAcceptedResponse(payload);
       state = completeSubmission(
         state,
-        validSelectionResponse(payload, state.selectedId)
-          ? "validated"
-          : "failed",
+        accepted ? "accepted" : "failed",
+        accepted ? payload.bot_chat_url : null,
       );
+    } else if (response.status === 409 || response.status === 429) {
+      const payload = await response.json();
+      const code =
+        exactKeys(payload, ["detail"]) &&
+        exactKeys(payload.detail, ["code", "message"])
+          ? payload.detail.code
+          : null;
+      const outcome = {
+        no_source: "no_source",
+        invalid_selection: "stale",
+        active_limit: "active_limit",
+        recent_limit: "recent_limit",
+      }[code];
+      state = completeSubmission(state, outcome ?? "failed");
     } else {
       state = completeSubmission(state, "failed");
     }
@@ -905,6 +924,7 @@ elements.retry.addEventListener("click", fetchPalette);
 for (const button of document.querySelectorAll("[data-open-chat]")) {
   button.addEventListener("click", openChat);
 }
+elements.closeMiniApp.addEventListener("click", () => telegram?.close());
 
 if (telegram) {
   telegram.setHeaderColor?.("#07080D");

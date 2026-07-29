@@ -1,0 +1,88 @@
+"""Authenticated durable generation-job acceptance."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from car_wrap.api.dependencies import (
+    CurrentMiniAppSession,
+    database_session,
+    require_mini_app_session,
+)
+from car_wrap.api.schemas import JobAcceptedOut, SelectionValidationIn
+from car_wrap.jobs.contracts import AcceptanceErrorCode, JobAcceptanceError
+
+router = APIRouter(prefix="/api/v1", tags=["jobs"])
+CurrentSession = Annotated[
+    CurrentMiniAppSession,
+    Depends(require_mini_app_session),
+]
+DatabaseSession = Annotated[AsyncSession, Depends(database_session)]
+
+_ERRORS: dict[AcceptanceErrorCode, tuple[int, str]] = {
+    AcceptanceErrorCode.NO_SOURCE: (
+        status.HTTP_409_CONFLICT,
+        "Сначала отправьте фото автомобиля в чат с ботом.",  # noqa: RUF001
+    ),
+    AcceptanceErrorCode.INVALID_SELECTION: (
+        status.HTTP_409_CONFLICT,
+        "Выбранный цвет больше недоступен. Выберите другой.",
+    ),
+    AcceptanceErrorCode.ACTIVE_LIMIT: (
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        "Дождитесь результата текущего запроса и попробуйте снова.",
+    ),
+    AcceptanceErrorCode.RECENT_LIMIT: (
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        "Слишком много запросов за короткое время. Попробуйте позже.",
+    ),
+}
+
+
+@router.post(
+    "/jobs",
+    response_model=JobAcceptedOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def accept_job(
+    request: Request,
+    response: Response,
+    payload: SelectionValidationIn,
+    current: CurrentSession,
+    session: DatabaseSession,
+) -> JobAcceptedOut:
+    if request.query_params:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request",
+        )
+    service = request.app.state.job_acceptance_service
+    if service is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service unavailable",
+        )
+    try:
+        accepted = await service.accept(
+            session,
+            user_id=current.telegram_user_id,
+            color_id=payload.color_id,
+            submission_uuid=payload.client_submission_uuid,
+        )
+    except JobAcceptanceError as error:
+        status_code, message = _ERRORS[error.code]
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": error.code.value, "message": message},
+        ) from None
+    response.headers["Cache-Control"] = "no-store"
+    settings = request.app.state.settings
+    return JobAcceptedOut(
+        job_id=accepted.job_id,
+        status="queued",
+        accepted=True,
+        bot_chat_url=f"https://t.me/{settings.bot_username}",
+    )

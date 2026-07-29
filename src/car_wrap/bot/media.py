@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Buffer
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from io import BytesIO
 from typing import Any, Literal, Protocol
@@ -30,6 +30,7 @@ class MediaRejectionCode(StrEnum):
     PIXEL_LIMIT = "pixel_limit"
     UNREADABLE = "unreadable"
     DOWNLOAD_FAILED = "download_failed"
+    SOURCE_CHANGED = "source_changed"
 
 
 class MediaRejection(ValueError):
@@ -50,6 +51,17 @@ class AcceptedMedia:
     telegram_file_id: str
     telegram_file_unique_id: str
     media_kind: MediaKind
+    mime_type: str
+    byte_size: int
+    width: int
+    height: int
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadedMedia:
+    """Validated source bytes whose repr cannot expose media content."""
+
+    data: bytes = field(repr=False)
     mime_type: str
     byte_size: int
     width: int
@@ -144,16 +156,70 @@ async def read_supported_media(
     if media.file_size is not None and media.file_size > settings.max_media_bytes:
         raise MediaRejection(MediaRejectionCode.TOO_LARGE)
 
+    downloaded = await download_validated_bytes(
+        downloader,
+        file_id=media.file_id,
+        declared_mime_type=declared_mime_type,
+        settings=settings,
+    )
+    return AcceptedMedia(
+        telegram_file_id=media.file_id,
+        telegram_file_unique_id=media.file_unique_id,
+        media_kind=media_kind,
+        mime_type=downloaded.mime_type,
+        byte_size=downloaded.byte_size,
+        width=downloaded.width,
+        height=downloaded.height,
+    )
+
+
+async def read_snapshotted_media(
+    downloader: TelegramDownloader,
+    *,
+    file_id: str,
+    declared_mime_type: str,
+    expected_byte_size: int,
+    expected_width: int,
+    expected_height: int,
+    settings: AppSettings,
+) -> DownloadedMedia:
+    """Download a job source and require it to match its immutable snapshot."""
+
+    downloaded = await download_validated_bytes(
+        downloader,
+        file_id=file_id,
+        declared_mime_type=declared_mime_type,
+        settings=settings,
+    )
+    if (
+        downloaded.byte_size != expected_byte_size
+        or downloaded.width != expected_width
+        or downloaded.height != expected_height
+    ):
+        raise MediaRejection(MediaRejectionCode.SOURCE_CHANGED)
+    return downloaded
+
+
+async def download_validated_bytes(
+    downloader: TelegramDownloader,
+    *,
+    file_id: str,
+    declared_mime_type: str,
+    settings: AppSettings,
+) -> DownloadedMedia:
+    """Download and fully validate one bounded raster into memory."""
+
+    if declared_mime_type not in settings.document_mime_allowlist:
+        raise MediaRejection(MediaRejectionCode.UNSUPPORTED_FORMAT)
     buffer = CappedBytesIO(settings.max_media_bytes)
     payload: bytes | None = None
     try:
         try:
-            await downloader.download(media.file_id, destination=buffer)
+            await downloader.download(file_id, destination=buffer)
         except MediaRejection:
             raise
         except Exception:
             raise MediaRejection(MediaRejectionCode.DOWNLOAD_FAILED) from None
-
         payload = buffer.getvalue()
         observed_mime_type = _observed_mime_type(payload)
         if observed_mime_type != declared_mime_type:
@@ -174,10 +240,8 @@ async def read_supported_media(
             or validated.media_type != observed_mime_type
         ):
             raise MediaRejection(MediaRejectionCode.UNREADABLE)
-        return AcceptedMedia(
-            telegram_file_id=media.file_id,
-            telegram_file_unique_id=media.file_unique_id,
-            media_kind=media_kind,
+        return DownloadedMedia(
+            data=payload,
             mime_type=observed_mime_type,
             byte_size=len(payload),
             width=width,

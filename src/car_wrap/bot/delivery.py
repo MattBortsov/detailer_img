@@ -1,0 +1,151 @@
+"""Truthful in-memory Telegram result and recovery delivery."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Awaitable, Callable
+from enum import StrEnum
+from typing import Any, Protocol
+
+from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
+from aiogram.types import BufferedInputFile, ReplyParameters
+
+from car_wrap.generation.result import TelegramPhoto
+from car_wrap.jobs.contracts import DeliveryReceipt, ExecutionErrorCode, IntentKind
+
+_DISCLAIMER = "Это AI-визуализация. Реальный цвет плёнки или краски может отличаться."
+_MAX_RETRY_AFTER_SECONDS = 30
+
+RECOVERY_COPY: dict[ExecutionErrorCode, str] = {
+    ExecutionErrorCode.SOURCE_UNAVAILABLE: (
+        "Не удалось получить исходное фото. Отправьте фото ещё раз и создайте "
+        "новый запрос."
+    ),
+    ExecutionErrorCode.SOURCE_CHANGED: (
+        "Исходное фото изменилось или недоступно. Отправьте его ещё раз и "
+        "создайте новый запрос."
+    ),
+    ExecutionErrorCode.CUSTOM_REFERENCE_UNAVAILABLE: (
+        "Этот пользовательский цвет сейчас недоступен. Выберите другой цвет "
+        "и создайте новый запрос."
+    ),
+    ExecutionErrorCode.PROVIDER_UNAVAILABLE: (
+        "Сервис визуализации временно недоступен. Попробуйте создать новый "
+        "запрос позже."
+    ),
+    ExecutionErrorCode.PROVIDER_REJECTED: (
+        "Не удалось создать визуализацию для этого фото. Попробуйте другое "
+        "фото или цвет."
+    ),
+    ExecutionErrorCode.PROVIDER_INVALID_RESPONSE: (
+        "Не удалось получить корректную визуализацию. Создайте новый запрос позже."
+    ),
+    ExecutionErrorCode.PROVIDER_AMBIGUOUS: (
+        "Не удалось подтвердить результат генерации. Мы не будем повторять её "
+        "автоматически. При необходимости создайте новый запрос."
+    ),
+    ExecutionErrorCode.RESULT_INVALID: (
+        "Полученную визуализацию не удалось безопасно отправить. Создайте новый "
+        "запрос позже."
+    ),
+    ExecutionErrorCode.DELIVERY_UNAVAILABLE: (
+        "Не удалось отправить визуализацию в чат. Создайте новый запрос позже."
+    ),
+    ExecutionErrorCode.DELIVERY_AMBIGUOUS: (
+        "Не удалось подтвердить доставку визуализации. Генерация не будет "
+        "запущена повторно автоматически."
+    ),
+    ExecutionErrorCode.INTERNAL_FAILURE: (
+        "Не удалось завершить запрос. Попробуйте создать новый запрос позже."
+    ),
+}
+
+
+class DeliveryFailureKind(StrEnum):
+    UNAVAILABLE = "unavailable"
+    AMBIGUOUS = "ambiguous"
+
+
+class DeliveryFailure(RuntimeError):
+    def __init__(self, kind: DeliveryFailureKind) -> None:
+        self.kind = kind
+        super().__init__(kind.value)
+
+
+class TelegramSender(Protocol):
+    async def send_photo(self, **kwargs: Any) -> Any: ...
+
+    async def send_message(self, **kwargs: Any) -> Any: ...
+
+
+def result_caption(intent_kind: IntentKind, display_name: str) -> str:
+    title = (
+        "Удиви меня" if intent_kind is IntentKind.SURPRISE else f"Цвет: {display_name}"
+    )
+    return f"{title}.\n\n{_DISCLAIMER}"
+
+
+async def send_result(
+    sender: TelegramSender,
+    photo: TelegramPhoto,
+    *,
+    chat_id: int,
+    source_message_id: int,
+    intent_kind: IntentKind,
+    display_name: str,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> DeliveryReceipt:
+    if chat_id <= 0 or source_message_id <= 0:
+        raise ValueError("invalid Telegram result target")
+    kwargs = {
+        "chat_id": chat_id,
+        "photo": BufferedInputFile(photo.data, filename="result.jpg"),
+        "caption": result_caption(intent_kind, display_name),
+        "reply_parameters": ReplyParameters(
+            message_id=source_message_id,
+            allow_sending_without_reply=False,
+        ),
+    }
+    for attempt_number in range(2):
+        try:
+            message = await sender.send_photo(**kwargs)
+            message_id = getattr(message, "message_id", None)
+            result_chat = getattr(getattr(message, "chat", None), "id", None)
+            if type(message_id) is not int or message_id <= 0 or result_chat != chat_id:
+                raise DeliveryFailure(DeliveryFailureKind.AMBIGUOUS)
+            return DeliveryReceipt(chat_id=chat_id, message_id=message_id)
+        except TelegramRetryAfter as error:
+            if (
+                attempt_number != 0
+                or error.retry_after <= 0
+                or error.retry_after > _MAX_RETRY_AFTER_SECONDS
+            ):
+                raise DeliveryFailure(DeliveryFailureKind.UNAVAILABLE) from None
+            await sleep(float(error.retry_after))
+        except TelegramNetworkError:
+            raise DeliveryFailure(DeliveryFailureKind.AMBIGUOUS) from None
+        except DeliveryFailure:
+            raise
+        except Exception:
+            raise DeliveryFailure(DeliveryFailureKind.UNAVAILABLE) from None
+    raise AssertionError("unreachable delivery retry state")
+
+
+async def send_recovery(
+    sender: TelegramSender,
+    *,
+    chat_id: int,
+    source_message_id: int,
+    code: ExecutionErrorCode,
+) -> None:
+    try:
+        await sender.send_message(
+            chat_id=chat_id,
+            text=RECOVERY_COPY[code],
+            reply_parameters=ReplyParameters(
+                message_id=source_message_id,
+                allow_sending_without_reply=True,
+            ),
+        )
+    except Exception:
+        return

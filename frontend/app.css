@@ -183,6 +183,86 @@ h3 {
   font-weight: 700;
 }
 
+.accepted-state {
+  display: grid;
+  place-items: center;
+  min-height: calc(100svh - var(--space-3xl));
+  padding-block: var(--space-3xl);
+}
+
+.accepted-sheet {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  width: min(100%, 420px);
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  padding: var(--space-xl);
+  background: var(--color-elevated);
+  box-shadow: 0 28px 90px rgb(0 0 0 / 52%);
+  text-align: center;
+}
+
+.accepted-close {
+  position: absolute;
+  top: var(--space-md);
+  right: var(--space-md);
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.accepted-close svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-width: 2;
+}
+
+.accepted-mark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-block: var(--space-3xl) var(--space-md);
+  border: 1px solid rgb(69 230 168 / 40%);
+  border-radius: 50%;
+  background: rgb(69 230 168 / 10%);
+  color: var(--color-success);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.accepted-sheet h1 {
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.accepted-sheet p {
+  margin-block-start: var(--space-md);
+  color: var(--color-secondary);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.accepted-chat {
+  width: 100%;
+  margin-block-start: var(--space-xl);
+  border-radius: 14px;
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-accent);
+  color: #061014;
+  font-size: 16px;
+  font-weight: 650;
+}
+
 .spinner {
   width: 28px;
   height: 28px;

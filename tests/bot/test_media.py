@@ -13,6 +13,7 @@ from car_wrap.bot.media import (
     AcceptedMedia,
     MediaRejection,
     MediaRejectionCode,
+    read_snapshotted_media,
     read_supported_media,
 )
 from car_wrap.config import AppSettings
@@ -221,3 +222,34 @@ async def test_maps_external_download_failure_to_safe_code() -> None:
     assert caught.value.code is MediaRejectionCode.DOWNLOAD_FAILED
     assert "telegram-secret-canary" not in repr(caught.value)
     assert caught.value.__cause__ is None
+
+
+@pytest.mark.asyncio
+async def test_worker_read_requires_exact_snapshot_and_hides_bytes() -> None:
+    payload = image_bytes()
+    downloaded = await read_snapshotted_media(
+        FakeDownloader(payload),
+        file_id="opaque-file-id",
+        declared_mime_type="image/jpeg",
+        expected_byte_size=len(payload),
+        expected_width=64,
+        expected_height=48,
+        settings=settings(),
+    )
+
+    assert downloaded.data == payload
+    assert downloaded.byte_size == len(payload)
+    assert "data=" not in repr(downloaded)
+    assert "JFIF" not in repr(downloaded)
+
+    with pytest.raises(MediaRejection) as caught:
+        await read_snapshotted_media(
+            FakeDownloader(payload),
+            file_id="opaque-file-id",
+            declared_mime_type="image/jpeg",
+            expected_byte_size=len(payload) + 1,
+            expected_width=64,
+            expected_height=48,
+            settings=settings(),
+        )
+    assert caught.value.code is MediaRejectionCode.SOURCE_CHANGED
