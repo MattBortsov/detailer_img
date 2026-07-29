@@ -67,6 +67,10 @@ const elements = {
   adminPanel: document.querySelector("#admin-panel"),
   adminList: document.querySelector("#admin-list"),
   surprise: document.querySelector("#select-surprise"),
+  confirmDialog: document.querySelector("#confirm-color-dialog"),
+  confirmCopy: document.querySelector("#confirm-color-copy"),
+  confirmSelection: document.querySelector("#confirm-color-selection"),
+  closeConfirm: document.querySelector("#close-confirm-color"),
   addDialog: document.querySelector("#add-color-dialog"),
   addForm: document.querySelector("#add-color-form"),
   openAdd: document.querySelector("#open-add-color"),
@@ -87,6 +91,7 @@ let state = createAppState();
 let sessionExchangeAttempted = false;
 let catalogLoaded = false;
 let previewObjectUrl = null;
+let pendingColorId = null;
 const telegram = window.Telegram?.WebApp;
 
 function exactKeys(value, expected) {
@@ -223,8 +228,8 @@ function renderCard(item) {
   const card = fragment.querySelector(".palette-card");
   const front = fragment.querySelector(".card-front");
   const back = fragment.querySelector(".card-back");
-  const swatch = fragment.querySelector(".swatch-field");
-  const image = fragment.querySelector(".reference-image");
+  const swatches = fragment.querySelectorAll(".swatch-field");
+  const images = fragment.querySelectorAll(".reference-image");
   const frontSurface = cardButton(
     fragment,
     '.card-flip-surface[data-face="front"]',
@@ -260,10 +265,14 @@ function renderCard(item) {
     kind.hidden = item.kindLabel.length === 0;
   }
   if (item.previewUrl) {
-    image.src = item.previewUrl;
-    image.alt = `Образец цвета ${item.name}`;
-    image.hidden = false;
-    swatch.hidden = true;
+    for (const image of images) {
+      image.src = item.previewUrl;
+      image.alt = `Образец цвета ${item.name}`;
+      image.hidden = false;
+    }
+    for (const swatch of swatches) {
+      swatch.hidden = true;
+    }
   } else {
     card.style.setProperty("--swatch-color", item.displayHex);
   }
@@ -625,6 +634,39 @@ function findCardSurface(colorId, face) {
   );
 }
 
+function findPendingChoice(colorId) {
+  const paletteChoice = state.colors.find(
+    (choice) => choice.color_id === colorId,
+  );
+  if (paletteChoice) {
+    return paletteChoice;
+  }
+  return state.customColors.find(
+    (choice) => choice.selection_id === colorId,
+  );
+}
+
+function openConfirmDialog(colorId) {
+  const choice = findPendingChoice(colorId);
+  if (!choice || elements.confirmDialog.open) {
+    return;
+  }
+  pendingColorId = colorId;
+  elements.confirmCopy.textContent =
+    `Применить цвет «${choice.name}» к автомобилю?`;
+  elements.confirmDialog.showModal();
+  elements.confirmSelection.focus();
+}
+
+function closeConfirmDialog() {
+  const colorId = pendingColorId;
+  pendingColorId = null;
+  if (elements.confirmDialog.open) {
+    elements.confirmDialog.close();
+  }
+  findCardButton(colorId, ".select-button")?.focus({preventScroll: true});
+}
+
 function handleCardAction(event) {
   const button = event.target.closest("[data-action]");
   if (!(button instanceof HTMLButtonElement)) {
@@ -635,14 +677,7 @@ function handleCardAction(event) {
     return;
   }
   if (button.dataset.action === "select") {
-    const preserveFlip = state.flippedId === colorId;
-    state = selectChoice(state, colorId);
-    if (preserveFlip) {
-      state = setFlipped(state, colorId);
-    }
-    telegram?.HapticFeedback?.selectionChanged();
-    render();
-    findCardButton(colorId, ".select-button")?.focus({preventScroll: true});
+    openConfirmDialog(colorId);
     return;
   }
   if (button.dataset.action === "flip") {
@@ -656,6 +691,29 @@ function handleCardAction(event) {
 for (const grid of [elements.colorsGrid, elements.userColorsGrid]) {
   grid.addEventListener("click", handleCardAction);
 }
+
+elements.confirmSelection.addEventListener("click", () => {
+  const colorId = pendingColorId;
+  if (!colorId || !findPendingChoice(colorId)) {
+    closeConfirmDialog();
+    return;
+  }
+  const preserveFlip = state.flippedId === colorId;
+  state = selectChoice(state, colorId);
+  if (preserveFlip) {
+    state = setFlipped(state, colorId);
+  }
+  telegram?.HapticFeedback?.selectionChanged();
+  elements.confirmDialog.close();
+  pendingColorId = null;
+  render();
+  findCardButton(colorId, ".select-button")?.focus({preventScroll: true});
+});
+elements.closeConfirm.addEventListener("click", closeConfirmDialog);
+elements.confirmDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeConfirmDialog();
+});
 
 for (const tab of document.querySelectorAll('[role="tab"]')) {
   tab.addEventListener("click", async () => {

@@ -223,8 +223,10 @@ class Provider:
 
 class Sender:
     def __init__(self) -> None:
+        self.id = 1
         self.photos = 0
         self.messages: list[str] = []
+        self.actions: list[str] = []
 
     async def send_photo(self, **kwargs: Any) -> Any:
         self.photos += 1
@@ -233,6 +235,10 @@ class Sender:
     async def send_message(self, **kwargs: Any) -> Any:
         self.messages.append(kwargs["text"])
         return SimpleNamespace(message_id=31)
+
+    async def send_chat_action(self, **kwargs: Any) -> Any:
+        self.actions.append(kwargs["action"])
+        return True
 
 
 def _service(
@@ -271,6 +277,8 @@ async def test_palette_success_has_durable_side_effect_order() -> None:
     assert len(provider.payloads[0]["input_references"]) == 1
     assert "Графитовый" not in repr(provider.payloads[0])
     assert sender.photos == 1
+    assert sender.messages == ["🎨 Генерация запущена. Результат придёт в этот чат."]
+    assert sender.actions == ["upload_photo"]
 
 
 async def test_custom_uses_exact_digest_verified_second_reference() -> None:
@@ -332,5 +340,5 @@ async def test_provider_failure_is_terminal_without_delivery(
         expected,
         kind is ProviderFailureKind.AMBIGUOUS,
     )
-    assert len(sender.messages) == 1
+    assert len(sender.messages) == 2
     assert repr(outcome).find(SOURCE[:20].hex()) == -1

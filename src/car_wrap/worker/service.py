@@ -7,15 +7,18 @@ from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TypeVar
+from typing import TypeVar, cast
 from uuid import UUID
 
+from aiogram import Bot
+from aiogram.utils.chat_action import ChatActionSender
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from car_wrap.bot.delivery import (
     DeliveryFailure,
     DeliveryFailureKind,
     TelegramSender,
+    send_generation_started,
     send_recovery,
     send_result,
 )
@@ -115,6 +118,11 @@ class GenerationWorkerService:
     async def execute(self, attempt: ClaimedAttempt) -> WorkerOutcome:
         """Execute one already-claimed attempt with durable side-effect markers."""
 
+        await send_generation_started(
+            self._sender,
+            chat_id=attempt.chat_id,
+            source_message_id=attempt.source_message_id,
+        )
         stop_heartbeat = asyncio.Event()
         heartbeat = asyncio.create_task(
             self._heartbeat_loop(attempt, stop_heartbeat),
@@ -168,10 +176,16 @@ class GenerationWorkerService:
                     )
                 )
 
-            provider_image = await self._provider.generate(
-                payload,
-                on_safe_retry=record_safe_retry,
-            )
+            async with ChatActionSender.upload_photo(
+                chat_id=attempt.chat_id,
+                bot=cast(Bot, self._sender),
+                interval=4.0,
+                initial_sleep=4.0,
+            ):
+                provider_image = await self._provider.generate(
+                    payload,
+                    on_safe_retry=record_safe_retry,
+                )
             provider_receipt = provider_image.receipt
             await self._transaction(
                 lambda session: self._repository.mark_provider_succeeded(
@@ -200,8 +214,8 @@ class GenerationWorkerService:
                 normalized,
                 chat_id=attempt.chat_id,
                 source_message_id=attempt.source_message_id,
-                intent_kind=attempt.intent_kind,
-                display_name=attempt.intent_display_name,
+                bot_username=self._settings.bot_username,
+                mini_app_url=self._settings.mini_app_url,
             )
             await self._stop_heartbeat(stop_heartbeat, heartbeat)
             heartbeat_stopped = True

@@ -8,6 +8,7 @@ from aiogram import Bot, F, Router
 from aiogram.enums import ChatType
 from aiogram.filters import CommandStart
 from aiogram.types import (
+    CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
@@ -15,6 +16,7 @@ from aiogram.types import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from car_wrap.bot.delivery import MENU_CALLBACK_DATA
 from car_wrap.bot.media import (
     MediaRejection,
     MediaRejectionCode,
@@ -35,6 +37,7 @@ UNSUPPORTED_MESSAGE_COPY = (
 )
 WINNING_SOURCE_COPY = "Теперь выберите цвет."
 OLDER_SOURCE_COPY = "Фото принято, но для оклейки уже выбрано более новое фото."
+MENU_COPY = "Отправьте новое фото или выберите другой цвет для текущего."
 
 ActiveSourceSetter = Callable[..., Awaitable[ActiveSourceDecision]]
 
@@ -122,6 +125,27 @@ async def handle_unsupported_message(message: Message, *, bot: Bot) -> None:
     await bot.send_message(message.chat.id, UNSUPPORTED_MESSAGE_COPY)
 
 
+async def handle_menu_callback(
+    callback: CallbackQuery,
+    *,
+    bot: Bot,
+    settings: AppSettings,
+) -> None:
+    await bot.answer_callback_query(callback.id)
+    message = callback.message
+    if (
+        message is None
+        or message.chat.type != ChatType.PRIVATE
+        or message.chat.id != callback.from_user.id
+    ):
+        return
+    await bot.send_message(
+        message.chat.id,
+        MENU_COPY,
+        reply_markup=palette_keyboard(text="Выбрать цвет", settings=settings),
+    )
+
+
 async def handle_media_message(
     message: Message,
     *,
@@ -185,6 +209,10 @@ def create_router(
     """Build the three ordered private-chat handlers."""
 
     router = Router(name="car-wrap-private-ingress")
+
+    @router.callback_query(F.data == MENU_CALLBACK_DATA)
+    async def menu_handler(callback: CallbackQuery, bot: Bot) -> None:
+        await handle_menu_callback(callback, bot=bot, settings=settings)
 
     @router.message(CommandStart(), F.chat.type == ChatType.PRIVATE)
     async def start_handler(message: Message, bot: Bot) -> None:

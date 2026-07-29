@@ -29,6 +29,7 @@ pytestmark = [pytest.mark.postgresql, pytest.mark.asyncio]
 
 class RecordingSender:
     def __init__(self) -> None:
+        self.id = 1
         self.photo_call: dict[str, Any] | None = None
 
     async def send_photo(self, **kwargs: Any) -> Any:
@@ -37,6 +38,9 @@ class RecordingSender:
 
     async def send_message(self, **kwargs: Any) -> Any:
         return SimpleNamespace(message_id=100)
+
+    async def send_chat_action(self, **kwargs: Any) -> Any:
+        return True
 
 
 async def test_accepted_job_becomes_exact_reply_and_durable_receipt(
@@ -110,9 +114,14 @@ async def test_accepted_job_becomes_exact_reply_and_durable_receipt(
     assert provider.calls == 1
     assert sender.photo_call is not None
     assert sender.photo_call["caption"] == (
-        "Цвет: Графитовый.\n\n"
-        "Это AI-визуализация. Реальный цвет плёнки или краски может отличаться."
+        "✅ Ваше фото готово!\n\n"
+        "Результат работы @CarWrapBot\n\n"
+        "<i>Это AI-визуализация. Реальный цвет может отличаться "
+        "в зависимости от вашего экрана.</i>"
     )
+    assert sender.photo_call["parse_mode"] == "HTML"
+    buttons = sender.photo_call["reply_markup"].inline_keyboard[0]
+    assert [button.text for button in buttons] == ["Новая генерация", "Меню"]
     reply = sender.photo_call["reply_parameters"]
     assert (sender.photo_call["chat_id"], reply.message_id) == (1001, 17)
     assert reply.allow_sending_without_reply is False

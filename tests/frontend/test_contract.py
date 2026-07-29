@@ -131,6 +131,49 @@ def test_native_card_surfaces_flip_without_coupling_selection() -> None:
     assert "transition: none" in reduced_motion
 
 
+def test_confirmed_selection_and_matching_reverse_artwork() -> None:
+    html, css, js, _ = sources()
+    template = html.split('<template id="choice-template">', 1)[1]
+    back = template.split(
+        '<div class="card-face card-back" aria-hidden="true" inert>',
+        1,
+    )[1].split(
+        "</article>",
+        1,
+    )[0]
+
+    assert 'id="confirm-color-dialog"' in html
+    assert 'id="close-confirm-color"' in html
+    assert 'id="confirm-color-selection"' in html
+    assert ">Подтвердить</button>" in html
+    select_branch = js.split('if (button.dataset.action === "select") {', 1)[1].split(
+        'if (button.dataset.action === "flip") {', 1
+    )[0]
+    assert "openConfirmDialog(colorId)" in select_branch
+    assert "selectChoice" not in select_branch
+    assert "state = selectChoice(state, colorId)" in js
+    assert 'elements.confirmDialog.addEventListener("cancel"' in js
+    assert 'elements.closeConfirm.addEventListener("click"' in js
+    assert ".focus({preventScroll: true})" in js
+
+    assert template.count('class="card-visual"') == 2
+    assert template.count('class="swatch-field"') == 2
+    assert template.count('class="reference-image"') == 2
+    assert "floating-circles" not in back
+    assert template.count('class="floating-circles" aria-hidden="true"') == 1
+
+    assert 'fragment.querySelectorAll(".swatch-field")' in js
+    assert 'fragment.querySelectorAll(".reference-image")' in js
+    overlay = css.split(".card-back::after", 1)[1].split("}", 1)[0]
+    for rule in (
+        "position: absolute",
+        "inset: 0",
+        "rgb(0 0 0 /",
+        "pointer-events: none",
+    ):
+        assert rule in overlay
+
+
 def test_dark_premium_tokens_and_media_safety() -> None:
     _, css, js, _ = sources()
     for token in (

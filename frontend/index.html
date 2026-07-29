@@ -262,6 +262,24 @@
       </form>
     </dialog>
 
+    <dialog
+      class="confirm-color-dialog"
+      id="confirm-color-dialog"
+      aria-labelledby="confirm-color-title"
+    >
+      <div class="confirm-color-content">
+        <header class="dialog-header">
+          <div>
+            <p class="eyebrow">ПОДТВЕРЖДЕНИЕ</p>
+            <h2 id="confirm-color-title">Выбрать этот цвет?</h2>
+          </div>
+          <button class="icon-button" id="close-confirm-color" type="button" aria-label="Закрыть">×</button>
+        </header>
+        <p id="confirm-color-copy"></p>
+        <button class="confirm-color-submit" id="confirm-color-selection" type="button">Подтвердить</button>
+      </div>
+    </dialog>
+
     <template id="choice-template">
       <article class="palette-card" data-flipped="false" data-selected="false">
         <div class="card-inner">
@@ -303,6 +321,10 @@
               aria-expanded="false"
               aria-label="Скрыть подробности о цвете"
             ></button>
+            <div class="card-visual" aria-hidden="true">
+              <span class="swatch-field"></span>
+              <img class="reference-image" alt="" hidden>
+            </div>
             <div class="card-details">
               <p class="card-kind"></p>
               <h3 class="card-name"></h3>

@@ -16,6 +16,7 @@ from car_wrap.bot.router import (
     UNSUPPORTED_MESSAGE_COPY,
     create_router,
     handle_media_message,
+    handle_menu_callback,
     handle_start_message,
     handle_unsupported_message,
 )
@@ -84,6 +85,7 @@ class FakeBot:
         self.payload = payload
         self.download_failure = download_failure
         self.sent: list[dict[str, Any]] = []
+        self.answered_callbacks: list[str] = []
 
     async def download(self, file: str, destination: Any) -> None:
         del file
@@ -98,6 +100,9 @@ class FakeBot:
         **kwargs: Any,
     ) -> None:
         self.sent.append({"chat_id": chat_id, "text": text, **kwargs})
+
+    async def answer_callback_query(self, callback_query_id: str) -> None:
+        self.answered_callbacks.append(callback_query_id)
 
 
 def message(
@@ -155,6 +160,26 @@ async def test_start_and_unsupported_copy_are_exact() -> None:
 
     assert bot.sent[0]["text"] == NO_SOURCE_COPY
     assert bot.sent[1]["text"] == UNSUPPORTED_MESSAGE_COPY
+
+
+@pytest.mark.asyncio
+async def test_menu_callback_reopens_palette_or_invites_new_photo() -> None:
+    bot = FakeBot()
+    callback = SimpleNamespace(
+        id="callback-1",
+        from_user=SimpleNamespace(id=1001),
+        message=SimpleNamespace(chat=SimpleNamespace(id=1001, type="private")),
+    )
+
+    await handle_menu_callback(callback, bot=bot, settings=settings())
+
+    assert bot.answered_callbacks == ["callback-1"]
+    assert bot.sent[0]["text"] == (
+        "Отправьте новое фото или выберите другой цвет для текущего."
+    )
+    button = bot.sent[0]["reply_markup"].inline_keyboard[0][0]
+    assert button.text == "Выбрать цвет"
+    assert button.web_app.url == "https://wrap.example.com/app"
 
 
 @pytest.mark.parametrize(
@@ -280,3 +305,4 @@ async def test_download_failure_is_sanitized() -> None:
 def test_router_registers_private_start_media_and_fallback_handlers() -> None:
     router = create_router(settings=settings(), session_factory=FakeSessions())
     assert len(router.message.handlers) == 3
+    assert len(router.callback_query.handlers) == 1

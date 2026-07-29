@@ -92,6 +92,7 @@ class Provider:
 
 class Sender:
     def __init__(self) -> None:
+        self.id = 1
         self.photos = 0
 
     async def send_photo(self, **kwargs: Any) -> Any:
@@ -103,6 +104,9 @@ class Sender:
 
     async def send_message(self, **kwargs: Any) -> Any:
         return SimpleNamespace(message_id=100)
+
+    async def send_chat_action(self, **kwargs: Any) -> Any:
+        return True
 
 
 async def _custom_version(

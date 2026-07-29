@@ -480,11 +480,18 @@ h3 {
   flex-direction: column;
   justify-content: space-between;
   padding: var(--space-lg);
-  background:
-    radial-gradient(circle at 100% 0%, rgb(154 108 255 / 12%), transparent 46%),
-    linear-gradient(155deg, #171c29, #0e1119);
+  background: #0c0f17;
   -webkit-transform: rotateY(180deg) translateZ(0.1px);
   transform: rotateY(180deg) translateZ(0.1px);
+}
+
+.card-back::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  background: rgb(0 0 0 / 68%);
+  pointer-events: none;
 }
 
 .card-details {
@@ -652,6 +659,7 @@ h3 {
 
 .select-button,
 .select-surprise,
+.confirm-color-submit,
 .upload-submit,
 #submit-button {
   border-radius: 14px;
@@ -857,7 +865,8 @@ h3 {
   min-height: 52px;
 }
 
-.add-color-dialog {
+.add-color-dialog,
+.confirm-color-dialog {
   width: min(100% - 24px, 520px);
   max-height: calc(100svh - 24px);
   border: 1px solid var(--color-border);
@@ -869,8 +878,27 @@ h3 {
   box-shadow: 0 28px 90px rgb(0 0 0 / 60%);
 }
 
-.add-color-dialog::backdrop {
+.add-color-dialog::backdrop,
+.confirm-color-dialog::backdrop {
   background: rgb(0 0 0 / 72%);
+}
+
+.confirm-color-dialog {
+  width: min(100% - 24px, 420px);
+}
+
+.confirm-color-content {
+  display: grid;
+  gap: var(--space-xl);
+  padding: var(--space-xl);
+}
+
+.confirm-color-content > p {
+  color: var(--color-secondary);
+}
+
+.confirm-color-submit {
+  width: 100%;
 }
 
 #add-color-form {

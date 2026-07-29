@@ -4,16 +4,29 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from enum import StrEnum
 from typing import Any, Protocol
 
+from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
-from aiogram.types import BufferedInputFile, ReplyParameters
+from aiogram.types import (
+    BufferedInputFile,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyParameters,
+    WebAppInfo,
+)
 
 from car_wrap.generation.result import TelegramPhoto
-from car_wrap.jobs.contracts import DeliveryReceipt, ExecutionErrorCode, IntentKind
+from car_wrap.jobs.contracts import DeliveryReceipt, ExecutionErrorCode
 
-_DISCLAIMER = "Это AI-визуализация. Реальный цвет плёнки или краски может отличаться."
+GENERATION_STARTED_COPY = "🎨 Генерация запущена. Результат придёт в этот чат."
+MENU_CALLBACK_DATA = "main_menu"
+_DISCLAIMER = (
+    "Это AI-визуализация. Реальный цвет может отличаться "
+    "в зависимости от вашего экрана."
+)
 _MAX_RETRY_AFTER_SECONDS = 30
 
 RECOVERY_COPY: dict[ExecutionErrorCode, str] = {
@@ -77,12 +90,53 @@ class TelegramSender(Protocol):
 
     async def send_message(self, **kwargs: Any) -> Any: ...
 
+    async def send_chat_action(self, **kwargs: Any) -> Any: ...
 
-def result_caption(intent_kind: IntentKind, display_name: str) -> str:
-    title = (
-        "Удиви меня" if intent_kind is IntentKind.SURPRISE else f"Цвет: {display_name}"
+
+def result_caption(bot_username: str) -> str:
+    return (
+        "✅ Ваше фото готово!\n\n"
+        f"Результат работы @{bot_username}\n\n"
+        f"<i>{_DISCLAIMER}</i>"
     )
-    return f"{title}.\n\n{_DISCLAIMER}"
+
+
+def result_keyboard(mini_app_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Новая генерация",
+                    web_app=WebAppInfo(url=mini_app_url),
+                ),
+                InlineKeyboardButton(
+                    text="Меню",
+                    callback_data=MENU_CALLBACK_DATA,
+                ),
+            ]
+        ]
+    )
+
+
+async def send_generation_started(
+    sender: TelegramSender,
+    *,
+    chat_id: int,
+    source_message_id: int,
+) -> None:
+    """Best-effort acknowledgement; generation remains authoritative in PostgreSQL."""
+
+    with suppress(Exception):
+        await sender.send_message(
+            chat_id=chat_id,
+            text=GENERATION_STARTED_COPY,
+            reply_parameters=ReplyParameters(
+                message_id=source_message_id,
+                allow_sending_without_reply=True,
+            ),
+        )
+    with suppress(Exception):
+        await sender.send_chat_action(chat_id=chat_id, action="upload_photo")
 
 
 async def send_result(
@@ -91,8 +145,8 @@ async def send_result(
     *,
     chat_id: int,
     source_message_id: int,
-    intent_kind: IntentKind,
-    display_name: str,
+    bot_username: str,
+    mini_app_url: str,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> DeliveryReceipt:
     if chat_id <= 0 or source_message_id <= 0:
@@ -100,7 +154,9 @@ async def send_result(
     kwargs = {
         "chat_id": chat_id,
         "photo": BufferedInputFile(photo.data, filename="result.jpg"),
-        "caption": result_caption(intent_kind, display_name),
+        "caption": result_caption(bot_username),
+        "parse_mode": ParseMode.HTML,
+        "reply_markup": result_keyboard(mini_app_url),
         "reply_parameters": ReplyParameters(
             message_id=source_message_id,
             allow_sending_without_reply=False,
