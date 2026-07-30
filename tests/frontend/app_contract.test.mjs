@@ -15,7 +15,7 @@ test("accepted sheet has exact copy and exactly two authoritative actions", () =
   assert.ok(accepted);
   assert.match(accepted, />Запрос принят</);
   assert.match(accepted, />Результат придёт в чат с ботом\.</);
-  assert.match(accepted, />\s*Открыть чат\s*</);
+  assert.match(accepted, />\s*Вернуться в чат\s*</);
   assert.match(accepted, /aria-label="Закрыть Mini App"/);
   assert.equal((accepted.match(/<button/g) ?? []).length, 2);
 });

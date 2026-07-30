@@ -1,5 +1,3 @@
-const NAMED_ACTION = "Оклеить авто в этот цвет";
-const SURPRISE_ACTION = "Удивить меня";
 const MODES = new Set(["colors", "users", "surprise"]);
 
 function freezeState(value) {
@@ -28,7 +26,6 @@ export function createAppState() {
     submissionUuid: null,
     inFlight: false,
     actionEnabled: false,
-    actionLabel: NAMED_ACTION,
     announcement: "",
     botChatUrl: null,
     privacyText: "",
@@ -62,7 +59,6 @@ export function loadPalette(
     submissionUuid: null,
     inFlight: false,
     actionEnabled: false,
-    actionLabel: NAMED_ACTION,
     announcement: "",
     botChatUrl,
     privacyText,
@@ -143,7 +139,6 @@ export function selectChoice(state, colorId) {
     selectedId: choice.color_id,
     flippedId: null,
     actionEnabled: true,
-    actionLabel: surprise ? SURPRISE_ACTION : NAMED_ACTION,
     announcement: surprise
       ? "Выбран вариант: Surprise."
       : `Выбран цвет: ${choice.name}.`,
@@ -224,7 +219,6 @@ export function completeSubmission(state, outcome, botChatUrl = null) {
       submissionUuid: null,
       inFlight: false,
       actionEnabled: false,
-      actionLabel: NAMED_ACTION,
       announcement: "",
     });
   }

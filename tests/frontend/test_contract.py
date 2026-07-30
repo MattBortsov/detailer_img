@@ -114,10 +114,15 @@ def test_native_card_surfaces_flip_without_coupling_selection() -> None:
     assert "-webkit-transform: rotateY(180deg)" in css
     assert "rotateY(180deg)" in css
     assert "isolation: isolate" in css
-    assert "perspective: 1600px" in css
+    assert "perspective: 900px" in css
     assert "aspect-ratio: 4 / 5" in css
     assert ":hover" in css
     assert ":hover .card-inner" not in css
+    flip_branch = js.split('if (button.dataset.action === "flip") {', 1)[1].split(
+        "\n  }\n}", 1
+    )[0]
+    assert "syncCardFlip(colorId)" in flip_branch
+    assert "render()" not in flip_branch
 
     assert "Палитра" not in html
     assert '"Палитра"' not in js
@@ -146,12 +151,26 @@ def test_confirmed_selection_and_matching_reverse_artwork() -> None:
     assert 'id="close-confirm-color"' in html
     assert 'id="confirm-color-selection"' in html
     assert ">Подтвердить</button>" in html
+    assert 'id="confirm-color-copy"' not in html
+    assert "ПОДТВЕРЖДЕНИЕ" not in html
+    assert "Применить цвет" not in html + js
     select_branch = js.split('if (button.dataset.action === "select") {', 1)[1].split(
         'if (button.dataset.action === "flip") {', 1
     )[0]
     assert "openConfirmDialog(colorId)" in select_branch
     assert "selectChoice" not in select_branch
     assert "state = selectChoice(state, colorId)" in js
+    confirm_branch = js.split(
+        'elements.confirmSelection.addEventListener("click", async () => {',
+        1,
+    )[1].split(
+        "elements.closeConfirm.addEventListener",
+        1,
+    )[0]
+    assert "await submitSelectedChoice()" in confirm_branch
+    assert "submitSelectedChoice()" not in select_branch
+    assert "openConfirmDialog(state.surprise.color_id)" in js
+    assert 'elements.form.addEventListener("submit"' not in js
     assert 'elements.confirmDialog.addEventListener("cancel"' in js
     assert 'elements.closeConfirm.addEventListener("click"' in js
     assert ".focus({preventScroll: true})" in js
@@ -172,6 +191,32 @@ def test_confirmed_selection_and_matching_reverse_artwork() -> None:
         "pointer-events: none",
     ):
         assert rule in overlay
+
+
+def test_palette_removes_requested_chrome_and_keeps_chat_return() -> None:
+    html, css, js, _ = sources()
+    combined = html + js
+
+    for removed in (
+        "CARWRAP STUDIO",
+        "Фото готово",
+        "Используем последнее принятое фото из чата.",
+        "Оклеить авто в этот цвет",
+        "Выберите один вариант",
+        "ПОДТВЕРЖДЕНИЕ",
+        "Применить цвет",
+    ):
+        assert removed not in combined
+
+    assert 'id="colors-count"' not in html
+    assert 'id="privacy-copy"' not in html
+    assert 'id="submit-button"' not in html
+    assert 'id="action-hint"' not in html
+    assert "Открыть чат" not in html
+    assert html.count("Вернуться в чат") == 4
+    assert ".confirm-color-dialog .icon-button" in css
+    assert "top: var(--space-sm)" in css
+    assert "right: var(--space-sm)" in css
 
 
 def test_dark_premium_tokens_and_media_safety() -> None:

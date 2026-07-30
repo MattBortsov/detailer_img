@@ -24,18 +24,9 @@
 
       <section id="ready-state" hidden>
         <header class="page-header">
-          <p class="eyebrow">CARWRAP STUDIO</p>
           <h1>Выберите цвет</h1>
           <p>Цвет применится ко всем видимым окрашенным частям авто.</p>
         </header>
-
-        <section class="readiness-panel" aria-labelledby="ready-title">
-          <span class="status-mark" aria-hidden="true">✓</span>
-          <div>
-            <h2 id="ready-title">Фото готово</h2>
-            <p>Используем последнее принятое фото из чата.</p>
-          </div>
-        </section>
 
         <div class="mode-tabs" role="tablist" aria-label="Режим выбора цвета">
           <button
@@ -80,7 +71,6 @@
                 <p class="eyebrow">БАЗОВАЯ ПАЛИТРА</p>
                 <h2>Colors</h2>
               </div>
-              <span class="section-count" id="colors-count"></span>
             </div>
             <div class="palette-grid" id="colors-grid"></div>
           </section>
@@ -150,17 +140,12 @@
             </div>
           </section>
 
-          <p class="privacy-copy" id="privacy-copy"></p>
           <p class="selection-status" id="selection-status" role="status" aria-live="polite"></p>
           <div class="inline-alert" id="inline-alert" role="alert" hidden></div>
 
           <div class="action-bar">
-            <p id="action-hint">Выберите один вариант</p>
-            <button id="submit-button" type="submit" disabled>
-              Оклеить авто в этот цвет
-            </button>
             <button class="chat-button" type="button" data-open-chat>
-              Открыть чат
+              Вернуться в чат
             </button>
           </div>
         </form>
@@ -170,13 +155,13 @@
       <section class="center-state" id="no-source-state" hidden>
         <h1 tabindex="-1">Сначала отправьте фото</h1>
         <p>Отправьте в чат фото автомобиля или мотоцикла и откройте палитру снова.</p>
-        <button type="button" data-open-chat>Открыть чат</button>
+        <button type="button" data-open-chat>Вернуться в чат</button>
       </section>
 
       <section class="center-state" id="auth-failed-state" hidden>
         <h1 tabindex="-1">Сессия истекла</h1>
         <p>Откройте палитру заново из последнего сообщения бота.</p>
-        <button type="button" data-open-chat>Открыть чат</button>
+        <button type="button" data-open-chat>Вернуться в чат</button>
       </section>
 
       <section class="center-state" id="palette-failed-state" hidden>
@@ -207,7 +192,7 @@
           <h1 id="accepted-title" tabindex="-1">Запрос принят</h1>
           <p>Результат придёт в чат с ботом.</p>
           <button class="accepted-chat" type="button" data-open-chat>
-            Открыть чат
+            Вернуться в чат
           </button>
         </div>
       </section>
@@ -269,13 +254,9 @@
     >
       <div class="confirm-color-content">
         <header class="dialog-header">
-          <div>
-            <p class="eyebrow">ПОДТВЕРЖДЕНИЕ</p>
-            <h2 id="confirm-color-title">Выбрать этот цвет?</h2>
-          </div>
+          <h2 id="confirm-color-title">Выбрать этот цвет?</h2>
           <button class="icon-button" id="close-confirm-color" type="button" aria-label="Закрыть">×</button>
         </header>
-        <p id="confirm-color-copy"></p>
         <button class="confirm-color-submit" id="confirm-color-selection" type="button">Подтвердить</button>
       </div>
     </dialog>

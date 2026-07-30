@@ -85,7 +85,7 @@ test("community pagination preserves server order and deduplicates", () => {
   assert.equal(second.catalogCursor, null);
 });
 
-test("named and Surprise selections use distinct exact CTA copy", () => {
+test("named and Surprise selections enable submission without global CTA copy", () => {
   const loaded = loadPalette(createAppState(), {
     choices,
     sourceReady: true,
@@ -94,10 +94,11 @@ test("named and Surprise selections use distinct exact CTA copy", () => {
   const named = selectChoice(loaded, "charcoal");
   const surprise = selectChoice(activateMode(named, "surprise"), "surprise_me");
 
-  assert.equal(named.actionLabel, "Оклеить авто в этот цвет");
   assert.equal(named.selectedId, "charcoal");
-  assert.equal(surprise.actionLabel, "Удивить меня");
+  assert.equal(named.actionEnabled, true);
   assert.equal(surprise.selectedId, "surprise_me");
+  assert.equal(surprise.actionEnabled, true);
+  assert.equal("actionLabel" in named, false);
 });
 
 test("upload states expose progress without moderation ETA", () => {

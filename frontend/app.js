@@ -54,13 +54,9 @@ const elements = {
   colorsGrid: document.querySelector("#colors-grid"),
   userColorsGrid: document.querySelector("#user-colors-grid"),
   userColorsEmpty: document.querySelector("#user-colors-empty"),
-  colorsCount: document.querySelector("#colors-count"),
   choiceTemplate: document.querySelector("#choice-template"),
-  privacy: document.querySelector("#privacy-copy"),
   announcement: document.querySelector("#selection-status"),
   alert: document.querySelector("#inline-alert"),
-  actionHint: document.querySelector("#action-hint"),
-  submit: document.querySelector("#submit-button"),
   retry: document.querySelector("#retry-palette"),
   loadMore: document.querySelector("#load-more-colors"),
   mineList: document.querySelector("#mine-list"),
@@ -68,7 +64,6 @@ const elements = {
   adminList: document.querySelector("#admin-list"),
   surprise: document.querySelector("#select-surprise"),
   confirmDialog: document.querySelector("#confirm-color-dialog"),
-  confirmCopy: document.querySelector("#confirm-color-copy"),
   confirmSelection: document.querySelector("#confirm-color-selection"),
   closeConfirm: document.querySelector("#close-confirm-color"),
   addDialog: document.querySelector("#add-color-dialog"),
@@ -290,7 +285,6 @@ function renderCards() {
   elements.userColorsGrid.replaceChildren(
     ...state.customColors.map((item) => renderCard(publicCard(item, "custom"))),
   );
-  elements.colorsCount.textContent = `${state.colors.length} цветов`;
   elements.userColorsEmpty.hidden =
     state.catalogLoading || state.customColors.length > 0;
   elements.loadMore.hidden =
@@ -408,14 +402,7 @@ function render() {
   renderManagement();
   renderUpload();
   elements.form.ariaBusy = String(state.inFlight);
-  elements.privacy.textContent = state.privacyText;
   elements.announcement.textContent = state.announcement;
-  elements.submit.textContent = state.inFlight
-    ? "Отправляем запрос…"
-    : state.actionLabel;
-  elements.submit.disabled = !state.actionEnabled || state.inFlight;
-  elements.actionHint.textContent =
-    state.selectedId === null ? "Выберите один вариант" : "Цвет выбран";
   elements.alert.hidden = ![
     "selection_stale",
     "submit_failed",
@@ -641,9 +628,13 @@ function findPendingChoice(colorId) {
   if (paletteChoice) {
     return paletteChoice;
   }
-  return state.customColors.find(
+  const customChoice = state.customColors.find(
     (choice) => choice.selection_id === colorId,
   );
+  if (customChoice) {
+    return customChoice;
+  }
+  return state.surprise?.color_id === colorId ? state.surprise : null;
 }
 
 function openConfirmDialog(colorId) {
@@ -652,8 +643,6 @@ function openConfirmDialog(colorId) {
     return;
   }
   pendingColorId = colorId;
-  elements.confirmCopy.textContent =
-    `Применить цвет «${choice.name}» к автомобилю?`;
   elements.confirmDialog.showModal();
   elements.confirmSelection.focus();
 }
@@ -665,6 +654,26 @@ function closeConfirmDialog() {
     elements.confirmDialog.close();
   }
   findCardButton(colorId, ".select-button")?.focus({preventScroll: true});
+}
+
+function syncCardFlip(colorId) {
+  const card = [...document.querySelectorAll(".palette-card")].find(
+    (candidate) => candidate.dataset.colorId === colorId,
+  );
+  if (!card) {
+    return;
+  }
+  const flipped = state.flippedId === colorId;
+  const front = card.querySelector(".card-front");
+  const back = card.querySelector(".card-back");
+  card.dataset.flipped = String(flipped);
+  front.ariaHidden = String(flipped);
+  back.ariaHidden = String(!flipped);
+  front.inert = flipped;
+  back.inert = !flipped;
+  for (const surface of card.querySelectorAll(".card-flip-surface")) {
+    surface.ariaExpanded = String(flipped);
+  }
 }
 
 function handleCardAction(event) {
@@ -683,8 +692,10 @@ function handleCardAction(event) {
   if (button.dataset.action === "flip") {
     const nextFace = button.dataset.face === "front" ? "back" : "front";
     state = setFlipped(state, colorId);
-    render();
-    findCardSurface(colorId, nextFace)?.focus({preventScroll: true});
+    syncCardFlip(colorId);
+    window.requestAnimationFrame(() => {
+      findCardSurface(colorId, nextFace)?.focus({preventScroll: true});
+    });
   }
 }
 
@@ -692,22 +703,20 @@ for (const grid of [elements.colorsGrid, elements.userColorsGrid]) {
   grid.addEventListener("click", handleCardAction);
 }
 
-elements.confirmSelection.addEventListener("click", () => {
+elements.confirmSelection.addEventListener("click", async () => {
   const colorId = pendingColorId;
   if (!colorId || !findPendingChoice(colorId)) {
     closeConfirmDialog();
     return;
   }
-  const preserveFlip = state.flippedId === colorId;
   state = selectChoice(state, colorId);
-  if (preserveFlip) {
-    state = setFlipped(state, colorId);
-  }
   telegram?.HapticFeedback?.selectionChanged();
   elements.confirmDialog.close();
   pendingColorId = null;
-  render();
-  findCardButton(colorId, ".select-button")?.focus({preventScroll: true});
+  await submitSelectedChoice();
+  if (state.view !== "accepted") {
+    findCardButton(colorId, ".select-button")?.focus({preventScroll: true});
+  }
 });
 elements.closeConfirm.addEventListener("click", closeConfirmDialog);
 elements.confirmDialog.addEventListener("cancel", (event) => {
@@ -748,14 +757,11 @@ for (const tab of document.querySelectorAll('[role="tab"]')) {
 
 elements.surprise.addEventListener("click", () => {
   if (state.surprise) {
-    state = selectChoice(state, state.surprise.color_id);
-    telegram?.HapticFeedback?.selectionChanged();
-    render();
+    openConfirmDialog(state.surprise.color_id);
   }
 });
 
-elements.form.addEventListener("submit", async (event) => {
-  event.preventDefault();
+async function submitSelectedChoice() {
   const pending = beginSubmission(state, () => crypto.randomUUID());
   state = pending.state;
   render();
@@ -807,7 +813,7 @@ elements.form.addEventListener("submit", async (event) => {
     }
   }
   render();
-});
+}
 
 function revokePreview() {
   if (previewObjectUrl !== null) {
