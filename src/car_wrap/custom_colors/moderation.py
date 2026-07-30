@@ -150,7 +150,8 @@ def build_color_name_payload(data: bytes, *, model: str) -> dict[str, Any]:
             {
                 "role": "system",
                 "content": (
-                    "Read the printed product or vehicle-wrap film name from the image. "
+                    "Read the printed product or vehicle-wrap film name "
+                    "from the image. "
                     "Return the name only when it is clearly visible and legible. "
                     "Do not infer, translate, expand, or invent a color name. "
                     "Return null when the printed name is absent or uncertain."
