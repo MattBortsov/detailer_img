@@ -36,6 +36,13 @@ class ModerationResult:
     domain_confidence: int
 
 
+@dataclass(frozen=True, slots=True)
+class ColorNameResult:
+    """OCR result for a clearly printed product or film name."""
+
+    name: str | None
+
+
 class _ProviderDecision(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -107,15 +114,10 @@ def build_moderation_payload(data: bytes, *, model: str) -> dict[str, Any]:
             {
                 "role": "user",
                 "content": [
-                    {
-                        "type": "text",
-                        "text": "Evaluate this custom color reference.",
-                    },
+                    {"type": "text", "text": "Evaluate this custom color reference."},
                     {
                         "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{encoded}",
-                        },
+                        "image_url": {"url": f"data:image/png;base64,{encoded}"},
                     },
                 ],
             },
@@ -124,6 +126,51 @@ def build_moderation_payload(data: bytes, *, model: str) -> dict[str, Any]:
             "type": "json_schema",
             "json_schema": {
                 "name": "custom_color_moderation",
+                "strict": True,
+                "schema": schema,
+            },
+        },
+        "provider": {"require_parameters": True},
+    }
+
+
+def build_color_name_payload(data: bytes, *, model: str) -> dict[str, Any]:
+    encoded = base64.b64encode(data).decode("ascii")
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "detected_name": {"type": ["string", "null"]},
+        },
+        "required": ["detected_name"],
+    }
+    return {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Read the printed product or vehicle-wrap film name from the image. "
+                    "Return the name only when it is clearly visible and legible. "
+                    "Do not infer, translate, expand, or invent a color name. "
+                    "Return null when the printed name is absent or uncertain."
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Extract the printed film name."},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{encoded}"},
+                    },
+                ],
+            },
+        ],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "color_name_extraction",
                 "strict": True,
                 "schema": schema,
             },
@@ -237,3 +284,50 @@ async def moderate_reference(
         ValueError,
     ):
         return _review("invalid_provider_response")
+
+
+async def extract_color_name(
+    data: bytes,
+    *,
+    client: httpx.AsyncClient,
+    api_key: str | None,
+    model: str,
+) -> ColorNameResult:
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        async with client.stream(
+            "POST",
+            OPENROUTER_CHAT_URL,
+            headers=headers,
+            json=build_color_name_payload(data, model=model),
+            timeout=httpx.Timeout(30.0, connect=10.0),
+        ) as response:
+            if response.status_code != 200:
+                return ColorNameResult(None)
+            content_type = response.headers.get("content-type", "").split(";", 1)[0]
+            if content_type != "application/json":
+                return ColorNameResult(None)
+            body = bytearray()
+            async for chunk in response.aiter_bytes():
+                if len(body) + len(chunk) > _MAX_RESPONSE_BYTES:
+                    return ColorNameResult(None)
+                body.extend(chunk)
+        payload: object = json.loads(body)
+        if not isinstance(payload, dict):
+            return ColorNameResult(None)
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or len(choices) != 1:
+            return ColorNameResult(None)
+        message = choices[0].get("message") if isinstance(choices[0], dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, str):
+            return ColorNameResult(None)
+        decoded = json.loads(content)
+        name = decoded.get("detected_name") if isinstance(decoded, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            return ColorNameResult(None)
+        return ColorNameResult(name.strip())
+    except (httpx.RequestError, json.JSONDecodeError, TypeError, ValueError):
+        return ColorNameResult(None)

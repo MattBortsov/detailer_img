@@ -83,4 +83,4 @@ async def parse_custom_color_upload(request: Request) -> CustomColorUpload:
         name = name_bytes.decode("utf-8", errors="strict")
     except UnicodeDecodeError:
         raise HTTPException(status_code=422, detail="Invalid upload") from None
-    return CustomColorUpload(name=name, image=image, mime_type=image_mime)
+    return CustomColorUpload(name=name.strip(), image=image, mime_type=image_mime)

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from car_wrap.custom_colors.media import CanonicalImage
 from car_wrap.custom_colors.moderation import (
+    ColorNameResult,
     ModerationDisposition,
     ModerationResult,
     normalize_display_name,
@@ -84,6 +85,7 @@ class Repository(Protocol):
 
 Normalize = Callable[[bytes, str], CanonicalImage]
 Moderate = Callable[[bytes], Awaitable[ModerationResult]]
+ExtractName = Callable[[bytes], Awaitable[ColorNameResult]]
 
 
 class CustomColorService:
@@ -94,12 +96,14 @@ class CustomColorService:
         repository: Repository,
         normalize: Normalize,
         moderate: Moderate,
+        extract_name: ExtractName | None = None,
         moderation_model: str,
     ) -> None:
         self._storage = storage
         self._repository = repository
         self._normalize = normalize
         self._moderate = moderate
+        self._extract_name = extract_name
         self._moderation_model = moderation_model
 
     async def create(
@@ -116,8 +120,15 @@ class CustomColorService:
             raise ValueError("owner ID must be positive")
         if not _IDEMPOTENCY_PATTERN.fullmatch(idempotency_key):
             raise ValueError("invalid idempotency key")
-        normalized_name = normalize_display_name(display_name)
         canonical = self._normalize(upload, declared_mime)
+        normalized_name = display_name
+        if not normalized_name:
+            if self._extract_name is not None:
+                extracted = await self._extract_name(canonical.data)
+                normalized_name = extracted.name or ""
+            if not normalized_name:
+                normalized_name = "Без названия"
+        normalized_name = normalize_display_name(normalized_name)
         stored = self._storage.put(canonical.data)
         if stored.sha256 != canonical.sha256 or stored.byte_size != len(canonical.data):
             self._storage.delete(stored.key)

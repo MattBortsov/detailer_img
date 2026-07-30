@@ -9,7 +9,9 @@ import pytest
 
 from car_wrap.custom_colors.moderation import (
     ModerationDisposition,
+    build_color_name_payload,
     build_moderation_payload,
+    extract_color_name,
     moderate_reference,
     normalize_display_name,
 )
@@ -128,6 +130,29 @@ def test_payload_is_server_owned_and_contains_no_display_name() -> None:
     assert "Injected user name" not in rendered
     assert payload["response_format"]["json_schema"]["strict"] is True
     assert payload["provider"]["require_parameters"] is True
+
+
+@pytest.mark.asyncio
+async def test_extracts_only_a_clearly_printed_name() -> None:
+    body = {
+        "choices": [
+            {"message": {"content": json.dumps({"detected_name": " Avery Satin "})}}
+        ]
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    payload = build_color_name_payload(b"canonical", model="vision-model")
+    assert payload["response_format"]["json_schema"]["strict"] is True
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await extract_color_name(
+            b"canonical",
+            client=client,
+            api_key=None,
+            model="vision-model",
+        )
+    assert result.name == "Avery Satin"
 
 
 @pytest.mark.parametrize(

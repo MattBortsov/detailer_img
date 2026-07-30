@@ -100,6 +100,13 @@ def test_native_card_surfaces_flip_without_coupling_selection() -> None:
     assert "top: 24%" in css
     assert "left: 24%" in css
     assert "var(--swatch-color)" in css
+    assert 'card.dataset.kind = item.kindLabel ? "user" : "builtin"' in js
+    assert '.palette-card[data-kind="user"] .floating-circles' in css
+    user_circles_rule = css.split(
+        '.palette-card[data-kind="user"] .floating-circles',
+        1,
+    )[1].split("}", 1)[0]
+    assert "display: none" in user_circles_rule
 
     assert 'grid.addEventListener("click", handleCardAction)' in js
     assert 'button.dataset.action === "select"' in js

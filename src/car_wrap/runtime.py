@@ -18,7 +18,9 @@ from car_wrap.custom_colors.media import (
     normalize_reference,
 )
 from car_wrap.custom_colors.moderation import (
+    ColorNameResult,
     ModerationResult,
+    extract_color_name,
     moderate_reference,
 )
 from car_wrap.custom_colors.repository import CustomColorRepository
@@ -72,6 +74,14 @@ def build_application() -> FastAPI:
             model=settings.moderation_vision_model,
         )
 
+    async def extract_name(data: bytes) -> ColorNameResult:
+        return await extract_color_name(
+            data,
+            client=provider_client,
+            api_key=api_key,
+            model=settings.moderation_vision_model,
+        )
+
     service = CustomColorService(
         storage=storage,
         repository=repository,
@@ -82,6 +92,7 @@ def build_application() -> FastAPI:
             policy=media_policy,
         ),
         moderate=moderate,
+        extract_name=extract_name,
         moderation_model=settings.moderation_vision_model,
     )
 

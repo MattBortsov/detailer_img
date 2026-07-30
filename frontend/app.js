@@ -250,6 +250,7 @@ function renderCard(item) {
   const selected = state.selectedId === item.id;
 
   card.dataset.colorId = item.id;
+  card.dataset.kind = item.kindLabel ? "user" : "builtin";
   card.dataset.flipped = String(flipped);
   card.dataset.selected = String(selected);
   for (const surface of [frontSurface, backSurface]) {
@@ -982,9 +983,9 @@ elements.addForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const file = elements.imageInput.files?.[0];
   const name = elements.nameInput.value.trim();
-  if (!file || name.length < 1 || name.length > 40) {
+  if (!file || name.length > 40) {
     elements.dialogAlert.hidden = false;
-    elements.dialogAlert.textContent = "Добавьте одно фото и название цвета.";
+    elements.dialogAlert.textContent = "Добавьте одно фото. Название можно оставить пустым.";
     return;
   }
   const formData = new FormData();

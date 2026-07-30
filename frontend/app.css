@@ -646,6 +646,10 @@ h3 {
   pointer-events: none;
 }
 
+.palette-card[data-kind="user"] .floating-circles {
+  display: none;
+}
+
 .card-circle {
   position: absolute;
   top: 50%;
