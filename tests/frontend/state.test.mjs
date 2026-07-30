@@ -34,6 +34,7 @@ test("palette separates colors and Surprise into exact modes", () => {
   const loaded = loadPalette(createAppState(), {
     choices,
     sourceReady: true,
+    sourcePreviewUrl: "/api/v1/active-source/image",
     botChatUrl: "https://t.me/CarWrapBot",
     isAdmin: false,
   });
@@ -42,6 +43,7 @@ test("palette separates colors and Surprise into exact modes", () => {
   assert.deepEqual(loaded.colors.map((item) => item.color_id), ["charcoal"]);
   assert.equal(loaded.surprise.color_id, "surprise_me");
   assert.equal(loaded.isAdmin, false);
+  assert.equal(loaded.sourcePreviewUrl, "/api/v1/active-source/image");
   assert.equal(loaded.selectedId, null);
 });
 

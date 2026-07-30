@@ -28,6 +28,7 @@ export function createAppState() {
     actionEnabled: false,
     announcement: "",
     botChatUrl: null,
+    sourcePreviewUrl: null,
     privacyText: "",
     isAdmin: false,
     uploadState: "idle",
@@ -39,13 +40,21 @@ export function createAppState() {
 
 export function loadPalette(
   state,
-  { choices, sourceReady, botChatUrl, privacyText = "", isAdmin = false },
+  {
+    choices,
+    sourceReady,
+    sourcePreviewUrl = null,
+    botChatUrl,
+    privacyText = "",
+    isAdmin = false,
+  },
 ) {
   if (!sourceReady) {
     return freezeState({
       ...createAppState(),
       view: "no_active_source",
       botChatUrl,
+      sourcePreviewUrl: null,
       privacyText,
     });
   }
@@ -61,6 +70,7 @@ export function loadPalette(
     actionEnabled: false,
     announcement: "",
     botChatUrl,
+    sourcePreviewUrl,
     privacyText,
     isAdmin,
   });

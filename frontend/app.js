@@ -24,6 +24,7 @@ import {
 
 const HEX_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const BOT_URL_PATTERN = /^https:\/\/t\.me\/[A-Za-z][A-Za-z0-9_]{4,31}$/;
+const SOURCE_PREVIEW_URL = "/api/v1/active-source/image";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
@@ -49,6 +50,12 @@ const elements = {
   authFailed: document.querySelector("#auth-failed-state"),
   paletteFailed: document.querySelector("#palette-failed-state"),
   accepted: document.querySelector("#accepted-state"),
+  sourcePhotoThumbnail: document.querySelector("#source-photo-thumbnail"),
+  sourcePhotoDialog: document.querySelector("#source-photo-dialog"),
+  sourcePhotoFull: document.querySelector("#source-photo-full"),
+  openSourcePhoto: document.querySelector("#open-source-photo"),
+  closeSourcePhoto: document.querySelector("#close-source-photo"),
+  replaceSourcePhoto: document.querySelector("#replace-source-photo"),
   closeMiniApp: document.querySelector("#close-mini-app"),
   form: document.querySelector("#palette-form"),
   colorsGrid: document.querySelector("#colors-grid"),
@@ -87,6 +94,7 @@ let sessionExchangeAttempted = false;
 let catalogLoaded = false;
 let previewObjectUrl = null;
 let pendingColorId = null;
+let replacementInFlight = false;
 const telegram = window.Telegram?.WebApp;
 
 function exactKeys(value, expected) {
@@ -129,6 +137,7 @@ function validPaletteState(payload) {
       "choices",
       "source_ready",
       "source_message_id",
+      "source_preview_url",
       "bot_chat_url",
       "privacy_text",
       "session_expires_at",
@@ -148,8 +157,11 @@ function validPaletteState(payload) {
   if (
     (payload.source_ready &&
       (!Number.isInteger(payload.source_message_id) ||
-        payload.source_message_id <= 0)) ||
-    (!payload.source_ready && payload.source_message_id !== null)
+        payload.source_message_id <= 0 ||
+        payload.source_preview_url !== SOURCE_PREVIEW_URL)) ||
+    (!payload.source_ready &&
+      (payload.source_message_id !== null ||
+        payload.source_preview_url !== null))
   ) {
     return false;
   }
@@ -397,6 +409,12 @@ function render() {
     return;
   }
   showOnly(elements.ready);
+  if (
+    elements.sourcePhotoThumbnail.getAttribute("src") !==
+    state.sourcePreviewUrl
+  ) {
+    elements.sourcePhotoThumbnail.src = state.sourcePreviewUrl;
+  }
   renderMode();
   renderCards();
   renderManagement();
@@ -422,6 +440,10 @@ function trustedBotUrl(candidate) {
 
 function openChat() {
   const url = trustedBotUrl(state.botChatUrl);
+  openTelegramUrl(url);
+}
+
+function openTelegramUrl(url) {
   if (!url) {
     return;
   }
@@ -488,6 +510,7 @@ async function fetchPalette() {
     state = loadPalette(state, {
       choices: payload.choices,
       sourceReady: payload.source_ready,
+      sourcePreviewUrl: payload.source_preview_url,
       botChatUrl: payload.bot_chat_url,
       privacyText: payload.privacy_text,
       isAdmin: payload.is_admin,
@@ -499,6 +522,62 @@ async function fetchPalette() {
   }
   render();
 }
+
+elements.openSourcePhoto.addEventListener("click", () => {
+  if (state.sourcePreviewUrl !== SOURCE_PREVIEW_URL) {
+    return;
+  }
+  elements.sourcePhotoFull.src = state.sourcePreviewUrl;
+  elements.sourcePhotoDialog.showModal();
+  elements.closeSourcePhoto.focus();
+});
+
+function closeSourcePhoto() {
+  elements.sourcePhotoDialog.close();
+  elements.sourcePhotoFull.removeAttribute("src");
+  elements.openSourcePhoto.focus({preventScroll: true});
+}
+
+elements.closeSourcePhoto.addEventListener("click", closeSourcePhoto);
+elements.sourcePhotoDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeSourcePhoto();
+});
+
+elements.replaceSourcePhoto.addEventListener("click", async () => {
+  if (replacementInFlight) {
+    return;
+  }
+  replacementInFlight = true;
+  elements.replaceSourcePhoto.disabled = true;
+  try {
+    const response = await fetchJson("/api/v1/active-source/replacement", {
+      method: "POST",
+    });
+    const payload = await response.json();
+    if (
+      !response.ok ||
+      !exactKeys(payload, ["status", "bot_chat_url"]) ||
+      payload.status !== "prompt_sent"
+    ) {
+      throw new Error("Replacement prompt failed");
+    }
+    const url = trustedBotUrl(payload.bot_chat_url);
+    if (!url) {
+      throw new Error("Invalid bot URL");
+    }
+    openTelegramUrl(url);
+  } catch {
+    if (state.view !== "auth_failed") {
+      elements.alert.textContent =
+        "Не удалось запросить новое фото. Попробуйте ещё раз.";
+      elements.alert.hidden = false;
+    }
+  } finally {
+    replacementInFlight = false;
+    elements.replaceSourcePhoto.disabled = false;
+  }
+});
 
 function validCatalog(payload) {
   return (

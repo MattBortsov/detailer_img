@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx
+from aiogram import Bot
 from fastapi import FastAPI
 
 from car_wrap.api.app import create_app
@@ -60,6 +61,7 @@ def build_application() -> FastAPI:
         decode_timeout_seconds=settings.custom_color_decode_timeout_seconds,
     )
     provider_client = httpx.AsyncClient()
+    telegram_bot = Bot(token=settings.bot_token.get_secret_value())
     api_key = os.environ.get("OPENROUTER_API_KEY")
 
     async def moderate(data: bytes) -> ModerationResult:
@@ -89,6 +91,7 @@ def build_application() -> FastAPI:
         try:
             yield
         finally:
+            await telegram_bot.session.close()
             await provider_client.aclose()
             await engine.dispose()
 
@@ -99,5 +102,6 @@ def build_application() -> FastAPI:
         custom_color_storage=storage,
         custom_color_repository=repository,
         job_acceptance_service=job_service,
+        telegram_bot=telegram_bot,
         lifespan=lifespan,
     )

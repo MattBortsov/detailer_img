@@ -16,9 +16,12 @@ from car_wrap.api.dependencies import (
 from car_wrap.api.schemas import (
     PaletteChoiceOut,
     PaletteStateOut,
+    PhotoReplacementOut,
     SelectionValidationIn,
     SelectionValidationOut,
 )
+from car_wrap.bot.media import MediaRejection, read_snapshotted_media
+from car_wrap.bot.router import REPLACE_PHOTO_COPY, replace_photo_keyboard
 from car_wrap.db.models import ActiveSource, CustomColor, CustomColorVersion
 from car_wrap.palette import (
     PALETTE_CHOICES,
@@ -101,10 +104,110 @@ async def palette_state(
         choices=tuple(public_choice(choice) for choice in catalog),
         source_ready=source is not None,
         source_message_id=(source.source_message_id if source is not None else None),
+        source_preview_url=(
+            "/api/v1/active-source/image" if source is not None else None
+        ),
         bot_chat_url=f"https://t.me/{settings.bot_username}",
         privacy_text=PRIVACY_TEXT,
         session_expires_at=current.expires_at,
         is_admin=current.telegram_user_id in settings.admin_telegram_user_ids,
+    )
+
+
+@router.get("/active-source/image")
+async def active_source_image(
+    request: Request,
+    response: Response,
+    current: CurrentSession,
+    session: DatabaseSession,
+) -> Response:
+    if request.query_params:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request",
+        )
+    source = await owner_source(session, current.telegram_user_id)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Active source is unavailable",
+        )
+    bot = request.app.state.telegram_bot
+    if bot is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service unavailable",
+        )
+    try:
+        downloaded = await read_snapshotted_media(
+            bot,
+            file_id=source.telegram_file_id,
+            declared_mime_type=source.mime_type,
+            expected_byte_size=source.byte_size,
+            expected_width=source.width,
+            expected_height=source.height,
+            settings=request.app.state.settings,
+        )
+    except MediaRejection:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Active source is unavailable",
+        ) from None
+    response = Response(
+        content=downloaded.data,
+        media_type=downloaded.mime_type,
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": "inline",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+    return response
+
+
+@router.post(
+    "/active-source/replacement",
+    response_model=PhotoReplacementOut,
+)
+async def request_photo_replacement(
+    request: Request,
+    response: Response,
+    current: CurrentSession,
+    session: DatabaseSession,
+) -> PhotoReplacementOut:
+    if request.query_params:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request",
+        )
+    source = await owner_source(session, current.telegram_user_id)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Active source is unavailable",
+        )
+    bot = request.app.state.telegram_bot
+    if bot is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service unavailable",
+        )
+    try:
+        await bot.send_message(
+            source.chat_id,
+            REPLACE_PHOTO_COPY,
+            reply_markup=replace_photo_keyboard(),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not open replacement flow",
+        ) from None
+    response.headers["Cache-Control"] = "no-store"
+    settings = request.app.state.settings
+    return PhotoReplacementOut(
+        status="prompt_sent",
+        bot_chat_url=f"https://t.me/{settings.bot_username}",
     )
 
 

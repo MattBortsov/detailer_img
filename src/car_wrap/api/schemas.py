@@ -28,10 +28,16 @@ class PaletteStateOut(StrictApiModel):
     choices: tuple[PaletteChoiceOut, ...]
     source_ready: bool
     source_message_id: int | None
+    source_preview_url: str | None
     bot_chat_url: str
     privacy_text: str
     session_expires_at: datetime
     is_admin: bool
+
+
+class PhotoReplacementOut(StrictApiModel):
+    status: Literal["prompt_sent"]
+    bot_chat_url: str
 
 
 class SelectionValidationIn(StrictApiModel):

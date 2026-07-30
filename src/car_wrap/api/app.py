@@ -43,6 +43,7 @@ def create_app(
     custom_color_storage: Any = None,
     custom_color_repository: Any = None,
     job_acceptance_service: Any = None,
+    telegram_bot: Any = None,
     lifespan: Any = None,
 ) -> FastAPI:
     """Build an app with explicit configuration and persistence boundaries."""
@@ -62,6 +63,7 @@ def create_app(
     app.state.custom_color_storage = custom_color_storage
     app.state.custom_color_repository = custom_color_repository
     app.state.job_acceptance_service = job_acceptance_service
+    app.state.telegram_bot = telegram_bot
     app.include_router(health_router)
     app.include_router(session_router)
     app.include_router(palette_router)

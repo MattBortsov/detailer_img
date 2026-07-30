@@ -38,6 +38,8 @@ UNSUPPORTED_MESSAGE_COPY = (
 WINNING_SOURCE_COPY = "Теперь выберите цвет."
 OLDER_SOURCE_COPY = "Фото принято, но для оклейки уже выбрано более новое фото."
 MENU_COPY = "Отправьте новое фото или выберите другой цвет для текущего."
+REPLACE_PHOTO_COPY = "Пришлите новое фото"
+REPLACE_PHOTO_CANCEL_CALLBACK_DATA = "replace_photo:cancel"
 
 ActiveSourceSetter = Callable[..., Awaitable[ActiveSourceDecision]]
 
@@ -113,6 +115,19 @@ def palette_keyboard(
     )
 
 
+def replace_photo_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Отмена",
+                    callback_data=REPLACE_PHOTO_CANCEL_CALLBACK_DATA,
+                )
+            ]
+        ]
+    )
+
+
 async def handle_start_message(message: Message, *, bot: Bot) -> None:
     if not _trusted_private_message(message):
         return
@@ -142,6 +157,27 @@ async def handle_menu_callback(
     await bot.send_message(
         message.chat.id,
         MENU_COPY,
+        reply_markup=palette_keyboard(text="Выбрать цвет", settings=settings),
+    )
+
+
+async def handle_replace_photo_cancel_callback(
+    callback: CallbackQuery,
+    *,
+    bot: Bot,
+    settings: AppSettings,
+) -> None:
+    await bot.answer_callback_query(callback.id)
+    message = callback.message
+    if (
+        message is None
+        or message.chat.type != ChatType.PRIVATE
+        or message.chat.id != callback.from_user.id
+    ):
+        return
+    await bot.send_message(
+        message.chat.id,
+        WINNING_SOURCE_COPY,
         reply_markup=palette_keyboard(text="Выбрать цвет", settings=settings),
     )
 
@@ -213,6 +249,17 @@ def create_router(
     @router.callback_query(F.data == MENU_CALLBACK_DATA)
     async def menu_handler(callback: CallbackQuery, bot: Bot) -> None:
         await handle_menu_callback(callback, bot=bot, settings=settings)
+
+    @router.callback_query(F.data == REPLACE_PHOTO_CANCEL_CALLBACK_DATA)
+    async def replace_photo_cancel_handler(
+        callback: CallbackQuery,
+        bot: Bot,
+    ) -> None:
+        await handle_replace_photo_cancel_callback(
+            callback,
+            bot=bot,
+            settings=settings,
+        )
 
     @router.message(CommandStart(), F.chat.type == ChatType.PRIVATE)
     async def start_handler(message: Message, bot: Bot) -> None:

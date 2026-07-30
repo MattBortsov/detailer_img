@@ -219,6 +219,24 @@ def test_palette_removes_requested_chrome_and_keeps_chat_return() -> None:
     assert "right: var(--space-sm)" in css
 
 
+def test_active_photo_card_opens_full_photo_and_requests_replacement() -> None:
+    html, css, js, _ = sources()
+
+    assert 'class="source-photo-card"' in html
+    assert 'id="source-photo-thumbnail"' in html
+    assert "Генерация для этого фото" in html
+    assert 'id="replace-source-photo"' in html
+    assert ">Заменить" in html
+    assert 'id="source-photo-dialog"' in html
+    assert 'id="source-photo-full"' in html
+    assert "grid-template-columns: minmax(0, 1fr) minmax(0, 3fr)" in css
+    assert "aspect-ratio: 1" in css
+    assert "object-fit: cover" in css
+    assert 'fetchJson("/api/v1/active-source/replacement"' in js
+    assert "elements.sourcePhotoDialog.showModal()" in js
+    assert "telegram.openTelegramLink(url)" in js
+
+
 def test_dark_premium_tokens_and_media_safety() -> None:
     _, css, js, _ = sources()
     for token in (

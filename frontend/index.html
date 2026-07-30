@@ -28,6 +28,23 @@
           <p>Цвет применится ко всем видимым окрашенным частям авто.</p>
         </header>
 
+        <article class="source-photo-card" aria-label="Фото для генерации">
+          <button
+            class="source-photo-preview"
+            id="open-source-photo"
+            type="button"
+            aria-label="Открыть выбранное фото полностью"
+          >
+            <img id="source-photo-thumbnail" alt="Выбранное фото для генерации">
+          </button>
+          <div class="source-photo-copy">
+            <p>Генерация для этого фото</p>
+            <button class="replace-source-photo" id="replace-source-photo" type="button">
+              Заменить
+            </button>
+          </div>
+        </article>
+
         <div class="mode-tabs" role="tablist" aria-label="Режим выбора цвета">
           <button
             type="button"
@@ -197,6 +214,20 @@
         </div>
       </section>
     </main>
+
+    <dialog
+      class="source-photo-dialog"
+      id="source-photo-dialog"
+      aria-label="Выбранное фото"
+    >
+      <button
+        class="source-photo-close"
+        id="close-source-photo"
+        type="button"
+        aria-label="Закрыть фото"
+      >×</button>
+      <img id="source-photo-full" alt="Выбранное фото для генерации полностью">
+    </dialog>
 
     <dialog class="add-color-dialog" id="add-color-dialog" aria-labelledby="add-color-title">
       <form id="add-color-form" method="dialog">

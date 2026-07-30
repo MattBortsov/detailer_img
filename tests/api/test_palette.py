@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from PIL import Image
 
 from car_wrap.api.app import create_app
 from car_wrap.api.dependencies import (
@@ -49,6 +51,39 @@ def source() -> ActiveSource:
     )
 
 
+def jpeg() -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", (320, 256), (40, 50, 60)).save(buffer, format="JPEG")
+    return buffer.getvalue()
+
+
+def downloadable_source(data: bytes) -> ActiveSource:
+    row = source()
+    row.byte_size = len(data)
+    row.width = 320
+    row.height = 256
+    return row
+
+
+class FakeTelegramBot:
+    def __init__(self, payload: bytes = b"") -> None:
+        self.payload = payload
+        self.downloaded: list[str] = []
+        self.sent: list[dict[str, Any]] = []
+
+    async def download(self, file: str, destination: Any) -> None:
+        self.downloaded.append(file)
+        destination.write(self.payload)
+
+    async def send_message(
+        self,
+        chat_id: int,
+        text: str,
+        **kwargs: Any,
+    ) -> None:
+        self.sent.append({"chat_id": chat_id, "text": text, **kwargs})
+
+
 class FakeSession:
     def __init__(self, active_source: ActiveSource | None) -> None:
         self.active_source = active_source
@@ -83,12 +118,14 @@ def build_app(
     active_source: ActiveSource | None,
     *,
     admin_ids: tuple[int, ...] = (),
+    telegram_bot: FakeTelegramBot | None = None,
 ) -> tuple[Any, FakeSessions]:
     sessions = FakeSessions(active_source)
     app = create_app(
         settings=settings(admin_ids=admin_ids),
         session_factory=sessions,
         clock=lambda: NOW,
+        telegram_bot=telegram_bot,
     )
     app.dependency_overrides[require_mini_app_session] = lambda: CurrentMiniAppSession(
         telegram_user_id=1001,
@@ -112,6 +149,7 @@ async def test_palette_state_exposes_only_safe_ordered_owner_state() -> None:
     assert payload["palette_version"] == "1"
     assert payload["source_ready"] is True
     assert payload["source_message_id"] == 77
+    assert payload["source_preview_url"] == "/api/v1/active-source/image"
     assert payload["bot_chat_url"] == "https://t.me/CarWrapBot"
     assert payload["is_admin"] is False
     assert payload["privacy_text"] == (
@@ -186,7 +224,54 @@ async def test_palette_state_without_source_is_explicit_and_query_fails() -> Non
     assert response.status_code == 200
     assert response.json()["source_ready"] is False
     assert response.json()["source_message_id"] is None
+    assert response.json()["source_preview_url"] is None
     assert injected.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_active_source_image_streams_owner_photo_without_storage() -> None:
+    payload = jpeg()
+    telegram = FakeTelegramBot(payload)
+    app, _ = build_app(downloadable_source(payload), telegram_bot=telegram)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.get("/api/v1/active-source/image")
+        injected = await client.get(
+            "/api/v1/active-source/image",
+            params={"telegram_user_id": "2002"},
+        )
+
+    assert response.status_code == 200
+    assert response.content == payload
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["content-disposition"] == "inline"
+    assert telegram.downloaded == ["file-secret-canary"]
+    assert injected.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_replacement_request_prompts_same_owner_with_cancel() -> None:
+    telegram = FakeTelegramBot()
+    app, _ = build_app(source(), telegram_bot=telegram)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.post("/api/v1/active-source/replacement")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "prompt_sent",
+        "bot_chat_url": "https://t.me/CarWrapBot",
+    }
+    assert telegram.sent[0]["chat_id"] == 1001
+    assert telegram.sent[0]["text"] == "Пришлите новое фото"
+    button = telegram.sent[0]["reply_markup"].inline_keyboard[0][0]
+    assert button.text == "Отмена"
+    assert button.callback_data == "replace_photo:cancel"
 
 
 @pytest.mark.parametrize("color_id", ["charcoal", "surprise_me"])
