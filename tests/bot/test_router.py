@@ -261,11 +261,20 @@ async def test_custom_color_flow_collects_two_independent_axes_before_file() -> 
     assert service.calls[0]["color_structure"] == "multicolor"
     assert service.calls[0]["finish"] == "gloss"
     assert 1001 not in uploads
+    progress = [
+        item["text"]
+        for item in [*bot.sent, *bot.edited]
+        if item["text"].startswith("Изображение обработано на")
+    ]
+    assert progress == [
+        "Изображение обработано на 35%",
+        "Изображение обработано на 100%",
+    ]
     assert bot.edited[-1]["text"].startswith("Образец получен")
 
 
 @pytest.mark.asyncio
-async def test_custom_color_analysis_progress_remains_alive_during_long_step() -> None:
+async def test_custom_color_analysis_shows_requested_percent_sequence() -> None:
     bot = FakeBot(jpeg())
     sessions = FakeSessions()
     uploads = {1001: CustomColorUploadState("solid", "matte")}
@@ -295,15 +304,21 @@ async def test_custom_color_analysis_progress_remains_alive_during_long_step() -
         custom_color_service=SlowService(),
         pending_uploads=uploads,
         progress_interval_seconds=0.005,
+        progress_completion_pause_seconds=0,
     )
 
-    analyzing = [
-        edit["text"]
-        for edit in bot.edited
-        if "Анализируем цвет и материал" in edit["text"]
+    progress = [
+        item["text"]
+        for item in [*bot.sent, *bot.edited]
+        if item["text"].startswith("Изображение обработано на")
     ]
-    assert len(analyzing) >= 2
-    assert analyzing[0] != analyzing[-1]
+    assert progress == [
+        "Изображение обработано на 35%",
+        "Изображение обработано на 50%",
+        "Изображение обработано на 70%",
+        "Изображение обработано на 82%",
+        "Изображение обработано на 100%",
+    ]
     assert bot.edited[-1]["text"] == "✅ Образец принят: Liquid Metal"
 
 

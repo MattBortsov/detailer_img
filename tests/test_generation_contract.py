@@ -107,6 +107,50 @@ def test_profiled_custom_prompt_uses_only_server_owned_material_metadata() -> No
 
 
 @pytest.mark.parametrize(
+    ("finish", "surface_response"),
+    (
+        (SurfaceFinish.MATTE, "broad diffuse highlights"),
+        (SurfaceFinish.SATIN, "softly diffused highlights"),
+        (SurfaceFinish.GLOSS, "crisp specular highlights"),
+    ),
+)
+def test_custom_prompt_adapts_reflections_to_selected_finish(
+    finish: SurfaceFinish,
+    surface_response: str,
+) -> None:
+    reference = b"cleaned-reference"
+    profile = ReferenceProfile(
+        ColorStructure.SOLID,
+        finish,
+        95,
+        (ColorCluster("#C9362D", (45.0, 56.0, 38.0), 1.0, (0, 0, 900, 900)),),
+    )
+    intent = CustomColorIntent(
+        color_id=uuid4(),
+        version_id=uuid4(),
+        version=1,
+        sha256="a" * 64,
+        object_key="private-reference.png",
+        color_structure="solid",
+        finish=finish.value,
+        color_profile=profile.to_dict(),
+        provider_reference_sha256=hashlib.sha256(reference).hexdigest(),
+    )
+
+    prompt = build_generation_payload(
+        model="x-ai/grok-imagine-image-quality",
+        intent=intent,
+        vehicle_bytes=b"vehicle",
+        vehicle_media_type="image/jpeg",
+        color_reference_bytes=reference,
+    )["prompt"]
+
+    assert surface_response in prompt
+    assert "Preserve the scene's illumination direction" in prompt
+    assert "Adapt the painted surfaces' highlight sharpness" in prompt
+
+
+@pytest.mark.parametrize(
     "intent",
     (
         BuiltInColorIntent(PALETTE_CHOICES[0]),

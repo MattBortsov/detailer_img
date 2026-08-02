@@ -6,13 +6,28 @@ import base64
 import hashlib
 from typing import Any
 
-from car_wrap.custom_colors.analysis import ReferenceProfile
+from car_wrap.custom_colors.analysis import ReferenceProfile, SurfaceFinish
 from car_wrap.generation.contracts import (
     BuiltInColorIntent,
     CustomColorIntent,
     SurpriseIntent,
 )
 from car_wrap.prompting import build_recolor_prompt
+
+_FINISH_RESPONSE = {
+    SurfaceFinish.MATTE.value: (
+        "Use a matte material response with broad diffuse highlights and "
+        "minimal mirror-like reflections."
+    ),
+    SurfaceFinish.SATIN.value: (
+        "Use a satin material response with softly diffused highlights and "
+        "restrained environment reflections."
+    ),
+    SurfaceFinish.GLOSS.value: (
+        "Use a high-gloss material response with crisp specular highlights "
+        "and clear environment reflections."
+    ),
+}
 
 
 def _data_url(data: bytes, media_type: str) -> str:
@@ -71,11 +86,12 @@ def build_generation_payload(
             )
         else:
             profile = ReferenceProfile.from_dict(intent.color_profile)
+            finish_response = _FINISH_RESPONSE[intent.finish]
             if intent.color_structure == "solid":
                 material_intent = (
                     "Treat the second image as the sole target material reference. "
                     f"Its authoritative sRGB base color is {profile.base_rgb_hex} "
-                    f"and its finish is {intent.finish}."
+                    f"and its finish is {intent.finish}. {finish_response}"
                 )
             else:
                 palette_text = ", ".join(
@@ -86,6 +102,7 @@ def build_generation_payload(
                     "Treat the second image as the sole target material reference. "
                     "It represents an angle-dependent multicolor wrap with the "
                     f"weighted palette {palette_text} and {intent.finish} finish. "
+                    f"{finish_response} "
                     "Express the palette through material response to light and "
                     "viewing angle; do not reproduce its layout as stripes, panels, "
                     "decals, or a literal spatial gradient."
@@ -94,8 +111,10 @@ def build_generation_payload(
             "Use the first image as the vehicle source. "
             f"{material_intent} Recolor all visible painted vehicle body surfaces "
             "to match that material. Preserve vehicle geometry, identity, viewpoint, "
-            "parts, lighting, reflections, background, wheels, glass, trim, badges "
-            "and plates."
+            "parts, background, wheels, glass, trim, badges and plates. Preserve the "
+            "scene's illumination direction, exposure, shadow placement, and reflected "
+            "surroundings. Adapt the painted surfaces' highlight sharpness and "
+            "reflection strength to the target finish."
         )
     return {
         "model": model,

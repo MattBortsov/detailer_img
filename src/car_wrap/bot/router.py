@@ -58,10 +58,7 @@ CUSTOM_COLOR_REQUEST_COPY = (
     "Пришлите фото образца плёнки следующим сообщением именно как файл "
     "(скрепка → Файл), чтобы Telegram не сжал качество."
 )
-CUSTOM_COLOR_PROCESSING_COPY = "Проверяем образец плёнки\n{bar} {percent}%"
-CUSTOM_COLOR_ANALYZING_COPY = (
-    "Проверяем образец плёнки\nАнализируем цвет и материал…{elapsed}"
-)
+CUSTOM_COLOR_PROCESSING_COPY = "Изображение обработано на {percent}%"
 CUSTOM_COLOR_READY_COPY = "✅ Образец принят: {name}"
 CUSTOM_COLOR_PENDING_COPY = (
     "Образец получен, но требует дополнительной проверки. "
@@ -308,11 +305,6 @@ async def handle_custom_color_finish(
     await bot.send_message(message.chat.id, CUSTOM_COLOR_REQUEST_COPY)
 
 
-def _progress_bar(percent: int) -> str:
-    filled = min(10, max(0, percent // 10))
-    return "▰" * filled + "▱" * (10 - filled)
-
-
 async def _edit_progress(
     bot: Bot,
     *,
@@ -324,9 +316,7 @@ async def _edit_progress(
         await bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
-            text=CUSTOM_COLOR_PROCESSING_COPY.format(
-                bar=_progress_bar(percent), percent=percent
-            ),
+            text=CUSTOM_COLOR_PROCESSING_COPY.format(percent=percent),
         )
     except Exception:
         return
@@ -341,52 +331,27 @@ async def _await_with_analysis_progress(
     interval_seconds: float,
 ) -> Any:
     task = asyncio.ensure_future(operation)
-    elapsed = 0.0
-    await _edit_analysis_progress(
-        bot,
-        chat_id=chat_id,
-        message_id=message_id,
-        elapsed_seconds=0,
-    )
     try:
-        while True:
+        for percent in (50, 70, 82):
             try:
                 return await asyncio.wait_for(
                     asyncio.shield(task),
                     timeout=interval_seconds,
                 )
             except TimeoutError:
-                elapsed += interval_seconds
-                await _edit_analysis_progress(
+                await _edit_progress(
                     bot,
                     chat_id=chat_id,
                     message_id=message_id,
-                    elapsed_seconds=max(1, round(elapsed)),
+                    percent=percent,
                 )
+        return await task
     except BaseException:
         if not task.done():
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
         raise
-
-
-async def _edit_analysis_progress(
-    bot: Bot,
-    *,
-    chat_id: int,
-    message_id: int,
-    elapsed_seconds: int,
-) -> None:
-    elapsed = f" · {elapsed_seconds} с" if elapsed_seconds > 0 else ""
-    try:
-        await bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text=CUSTOM_COLOR_ANALYZING_COPY.format(elapsed=elapsed),
-        )
-    except Exception:
-        return
 
 
 async def handle_custom_color_message(
@@ -397,7 +362,8 @@ async def handle_custom_color_message(
     session_factory: async_sessionmaker[AsyncSession],
     custom_color_service: CustomColorCreator,
     pending_uploads: CustomColorUploads,
-    progress_interval_seconds: float = 4.0,
+    progress_interval_seconds: float = 2.0,
+    progress_completion_pause_seconds: float = 0.7,
 ) -> None:
     if not _trusted_private_message(message) or message.from_user is None:
         return
@@ -426,7 +392,7 @@ async def handle_custom_color_message(
         return
     progress = await bot.send_message(
         message.chat.id,
-        CUSTOM_COLOR_PROCESSING_COPY.format(bar=_progress_bar(10), percent=10),
+        CUSTOM_COLOR_PROCESSING_COPY.format(percent=35),
         reply_to_message_id=message.message_id,
     )
     progress_id = getattr(progress, "message_id", None)
@@ -435,9 +401,6 @@ async def handle_custom_color_message(
     try:
         downloaded = await read_supported_media_bytes(
             bot, message.document, settings=settings
-        )
-        await _edit_progress(
-            bot, chat_id=message.chat.id, message_id=progress_id, percent=35
         )
 
         async def create_color() -> Any:
@@ -461,8 +424,9 @@ async def handle_custom_color_message(
             interval_seconds=progress_interval_seconds,
         )
         await _edit_progress(
-            bot, chat_id=message.chat.id, message_id=progress_id, percent=90
+            bot, chat_id=message.chat.id, message_id=progress_id, percent=100
         )
+        await asyncio.sleep(progress_completion_pause_seconds)
         del pending_uploads[owner_id]
     except (MediaRejection, ValueError, RuntimeError):
         await bot.send_message(
