@@ -14,6 +14,8 @@ class CustomColorUpload:
     name: str
     image: bytes
     mime_type: str
+    color_structure: str
+    finish: str
 
 
 async def _bounded_body(request: Request, maximum: int) -> bytes:
@@ -67,7 +69,11 @@ async def parse_custom_color_upload(request: Request) -> CustomColorUpload:
             raise HTTPException(status_code=422, detail="Invalid upload")
         fields[name] = payload, part.get_content_type(), part.get_filename()
 
-    if set(fields) != {"name", "image"}:
+    field_names = set(fields)
+    if field_names not in (
+        {"name", "image"},
+        {"name", "image", "color_structure", "finish"},
+    ):
         raise HTTPException(status_code=422, detail="Invalid upload")
     name_bytes, _, name_filename = fields["name"]
     image, image_mime, image_filename = fields["image"]
@@ -83,4 +89,27 @@ async def parse_custom_color_upload(request: Request) -> CustomColorUpload:
         name = name_bytes.decode("utf-8", errors="strict")
     except UnicodeDecodeError:
         raise HTTPException(status_code=422, detail="Invalid upload") from None
-    return CustomColorUpload(name=name.strip(), image=image, mime_type=image_mime)
+    color_structure = "unspecified"
+    finish = "unspecified"
+    if "color_structure" in fields:
+        structure_bytes, _, structure_filename = fields["color_structure"]
+        finish_bytes, _, finish_filename = fields["finish"]
+        if structure_filename is not None or finish_filename is not None:
+            raise HTTPException(status_code=422, detail="Invalid upload")
+        try:
+            color_structure = structure_bytes.decode("ascii", errors="strict")
+            finish = finish_bytes.decode("ascii", errors="strict")
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=422, detail="Invalid upload") from None
+        if color_structure not in {"solid", "multicolor"} or finish not in {
+            "matte",
+            "satin",
+        }:
+            raise HTTPException(status_code=422, detail="Invalid upload")
+    return CustomColorUpload(
+        name=name.strip(),
+        image=image,
+        mime_type=image_mime,
+        color_structure=color_structure,
+        finish=finish,
+    )

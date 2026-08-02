@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, replace
+from typing import Any
+from uuid import UUID, uuid4
 
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatType
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandObject, CommandStart
 from aiogram.types import (
     CallbackQuery,
+    Document,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
@@ -21,8 +25,10 @@ from car_wrap.bot.media import (
     MediaRejection,
     MediaRejectionCode,
     read_supported_media,
+    read_supported_media_bytes,
 )
 from car_wrap.config import AppSettings
+from car_wrap.palette import custom_selection_id
 from car_wrap.services.active_source import (
     ActiveSourceDecision,
     set_active_source,
@@ -40,8 +46,41 @@ OLDER_SOURCE_COPY = "Фото принято, но для оклейки уже 
 MENU_COPY = "Отправьте новое фото или выберите другой цвет для текущего."
 REPLACE_PHOTO_COPY = "Пришлите новое фото"
 REPLACE_PHOTO_CANCEL_CALLBACK_DATA = "replace_photo:cancel"
+CUSTOM_COLOR_REQUEST_CALLBACK_DATA = "custom_color:request"
+CUSTOM_COLOR_STRUCTURE_PREFIX = "custom_color:structure:"
+CUSTOM_COLOR_FINISH_PREFIX = "custom_color:finish:"
+CUSTOM_COLOR_GENERATE_PREFIX = "ccg:"
+CUSTOM_COLOR_STRUCTURE_COPY = "Какая структура цвета у плёнки?"
+CUSTOM_COLOR_FINISH_COPY = "Какой финиш у плёнки?"
+CUSTOM_COLOR_REQUEST_COPY = (
+    "Пришлите фото образца плёнки следующим сообщением именно как файл "
+    "(скрепка → Файл), чтобы Telegram не сжал качество."
+)
+CUSTOM_COLOR_PROCESSING_COPY = "Проверяем образец плёнки\n{bar} {percent}%"
+CUSTOM_COLOR_READY_COPY = "✅ Образец принят: {name}"
+CUSTOM_COLOR_PENDING_COPY = (
+    "Образец получен, но требует дополнительной проверки. "
+    "Когда он будет одобрен, цвет появится в User Colors."
+)
+CUSTOM_COLOR_RETAKE_COPY = (
+    "Не удалось надёжно определить материал. Сфотографируйте один образец "
+    "крупно, при ровном свете, без рук, текста поверх плёнки и глубоких бликов, "
+    "затем добавьте цвет заново."
+)
+CUSTOM_COLOR_FAILED_COPY = "Не удалось обработать образец. Отправьте файл ещё раз."
 
 ActiveSourceSetter = Callable[..., Awaitable[ActiveSourceDecision]]
+CustomColorCreator = Any
+JobAcceptor = Any
+
+
+@dataclass(frozen=True, slots=True)
+class CustomColorUploadState:
+    color_structure: str | None = None
+    finish: str | None = None
+
+
+CustomColorUploads = dict[int, CustomColorUploadState]
 
 
 def _trusted_private_message(message: Message) -> bool:
@@ -128,10 +167,300 @@ def replace_photo_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-async def handle_start_message(message: Message, *, bot: Bot) -> None:
+def custom_color_structure_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Однотонная",
+                    callback_data=f"{CUSTOM_COLOR_STRUCTURE_PREFIX}solid",
+                ),
+                InlineKeyboardButton(
+                    text="Многоцветная",
+                    callback_data=f"{CUSTOM_COLOR_STRUCTURE_PREFIX}multicolor",
+                ),
+            ]
+        ]
+    )
+
+
+def custom_color_finish_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Матовая",
+                    callback_data=f"{CUSTOM_COLOR_FINISH_PREFIX}matte",
+                ),
+                InlineKeyboardButton(
+                    text="Сатин",
+                    callback_data=f"{CUSTOM_COLOR_FINISH_PREFIX}satin",
+                ),
+            ]
+        ]
+    )
+
+
+async def handle_start_message(
+    message: Message,
+    *,
+    bot: Bot,
+    command: CommandObject | None = None,
+    pending_uploads: CustomColorUploads | None = None,
+) -> None:
     if not _trusted_private_message(message):
         return
+    if (
+        command is not None
+        and command.args == "custom_color"
+        and pending_uploads is not None
+    ):
+        await handle_custom_color_request(
+            message,
+            bot=bot,
+            pending_uploads=pending_uploads,
+        )
+        return
     await bot.send_message(message.chat.id, NO_SOURCE_COPY)
+
+
+async def handle_custom_color_request(
+    message: Message,
+    *,
+    bot: Bot,
+    pending_uploads: CustomColorUploads,
+) -> None:
+    if not _trusted_private_message(message) or message.from_user is None:
+        return
+    pending_uploads[message.from_user.id] = CustomColorUploadState()
+    await bot.send_message(
+        message.chat.id,
+        CUSTOM_COLOR_STRUCTURE_COPY,
+        reply_markup=custom_color_structure_keyboard(),
+    )
+
+
+async def handle_custom_color_structure(
+    callback: CallbackQuery,
+    *,
+    bot: Bot,
+    pending_uploads: CustomColorUploads,
+) -> None:
+    await bot.answer_callback_query(callback.id)
+    message = callback.message
+    if (
+        message is None
+        or message.chat.type != ChatType.PRIVATE
+        or message.chat.id != callback.from_user.id
+    ):
+        return
+    value = (callback.data or "")[len(CUSTOM_COLOR_STRUCTURE_PREFIX) :]
+    if value not in {"solid", "multicolor"}:
+        return
+    current = pending_uploads.get(callback.from_user.id, CustomColorUploadState())
+    pending_uploads[callback.from_user.id] = replace(
+        current,
+        color_structure=value,
+        finish=None,
+    )
+    await bot.send_message(
+        message.chat.id,
+        CUSTOM_COLOR_FINISH_COPY,
+        reply_markup=custom_color_finish_keyboard(),
+    )
+
+
+async def handle_custom_color_finish(
+    callback: CallbackQuery,
+    *,
+    bot: Bot,
+    pending_uploads: CustomColorUploads,
+) -> None:
+    await bot.answer_callback_query(callback.id)
+    message = callback.message
+    if (
+        message is None
+        or message.chat.type != ChatType.PRIVATE
+        or message.chat.id != callback.from_user.id
+    ):
+        return
+    value = (callback.data or "")[len(CUSTOM_COLOR_FINISH_PREFIX) :]
+    current = pending_uploads.get(callback.from_user.id)
+    if value not in {"matte", "satin"} or current is None:
+        return
+    if current.color_structure not in {"solid", "multicolor"}:
+        await bot.send_message(
+            message.chat.id,
+            CUSTOM_COLOR_STRUCTURE_COPY,
+            reply_markup=custom_color_structure_keyboard(),
+        )
+        return
+    pending_uploads[callback.from_user.id] = replace(current, finish=value)
+    await bot.send_message(message.chat.id, CUSTOM_COLOR_REQUEST_COPY)
+
+
+def _progress_bar(percent: int) -> str:
+    filled = min(10, max(0, percent // 10))
+    return "▰" * filled + "▱" * (10 - filled)
+
+
+async def _edit_progress(
+    bot: Bot,
+    *,
+    chat_id: int,
+    message_id: int,
+    percent: int,
+) -> None:
+    try:
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=CUSTOM_COLOR_PROCESSING_COPY.format(
+                bar=_progress_bar(percent), percent=percent
+            ),
+        )
+    except Exception:
+        return
+
+
+async def handle_custom_color_message(
+    message: Message,
+    *,
+    bot: Bot,
+    settings: AppSettings,
+    session_factory: async_sessionmaker[AsyncSession],
+    custom_color_service: CustomColorCreator,
+    pending_uploads: CustomColorUploads,
+) -> None:
+    if not _trusted_private_message(message) or message.from_user is None:
+        return
+    upload_state = pending_uploads.get(message.from_user.id)
+    if upload_state is None or upload_state.color_structure is None:
+        await bot.send_message(
+            message.chat.id,
+            CUSTOM_COLOR_STRUCTURE_COPY,
+            reply_markup=custom_color_structure_keyboard(),
+        )
+        return
+    if upload_state.finish is None:
+        await bot.send_message(
+            message.chat.id,
+            CUSTOM_COLOR_FINISH_COPY,
+            reply_markup=custom_color_finish_keyboard(),
+        )
+        return
+    if not isinstance(message.document, Document):
+        await bot.send_message(
+            message.chat.id,
+            "Отправьте образец именно как файл, а не как сжатое фото.",
+            reply_to_message_id=message.message_id,
+        )
+        return
+    progress = await bot.send_message(
+        message.chat.id,
+        CUSTOM_COLOR_PROCESSING_COPY.format(bar=_progress_bar(10), percent=10),
+        reply_to_message_id=message.message_id,
+    )
+    progress_id = getattr(progress, "message_id", None)
+    if not isinstance(progress_id, int):
+        progress_id = message.message_id
+    try:
+        downloaded = await read_supported_media_bytes(
+            bot, message.document, settings=settings
+        )
+        await _edit_progress(
+            bot, chat_id=message.chat.id, message_id=progress_id, percent=35
+        )
+        async with session_factory() as session:
+            color = await custom_color_service.create(
+                session,
+                owner_id=message.from_user.id,
+                display_name="",
+                upload=downloaded.data,
+                declared_mime=downloaded.mime_type,
+                idempotency_key=f"bot-{message.chat.id}-{message.message_id}",
+                color_structure=upload_state.color_structure,
+                finish=upload_state.finish,
+            )
+        await _edit_progress(
+            bot, chat_id=message.chat.id, message_id=progress_id, percent=90
+        )
+        del pending_uploads[message.from_user.id]
+    except (MediaRejection, ValueError, RuntimeError):
+        await bot.send_message(
+            message.chat.id,
+            CUSTOM_COLOR_FAILED_COPY,
+            reply_to_message_id=message.message_id,
+        )
+        return
+    status_value = getattr(color, "status", "")
+    name = getattr(color, "display_name", "Без названия")
+    if status_value != "approved":
+        pending_copy = (
+            CUSTOM_COLOR_RETAKE_COPY
+            if getattr(color, "reason_code", None) == "reference_analysis_uncertain"
+            else CUSTOM_COLOR_PENDING_COPY
+        )
+        await bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=progress_id,
+            text=pending_copy,
+        )
+        return
+    selection_id = custom_selection_id(
+        UUID(str(color.id)), int(getattr(color, "current_version", 1))
+    )
+    await bot.edit_message_text(
+        chat_id=message.chat.id,
+        message_id=progress_id,
+        text=CUSTOM_COLOR_READY_COPY.format(name=name),
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Запустить генерацию с этим цветом",
+                        callback_data=f"{CUSTOM_COLOR_GENERATE_PREFIX}{selection_id}",
+                    )
+                ]
+            ]
+        ),
+    )
+
+
+async def handle_custom_color_generate(
+    callback: CallbackQuery,
+    *,
+    bot: Bot,
+    job_acceptance_service: JobAcceptor,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await bot.answer_callback_query(callback.id)
+    message = callback.message
+    if (
+        message is None
+        or message.chat.type != ChatType.PRIVATE
+        or message.chat.id != callback.from_user.id
+    ):
+        return
+    color_id = (callback.data or "")[len(CUSTOM_COLOR_GENERATE_PREFIX) :]
+    try:
+        async with session_factory() as session:
+            await job_acceptance_service.accept(
+                session,
+                user_id=callback.from_user.id,
+                color_id=color_id,
+                submission_uuid=uuid4(),
+            )
+    except Exception:
+        await bot.send_message(
+            message.chat.id,
+            "Не удалось запустить генерацию. Откройте палитру и попробуйте ещё раз.",
+        )
+        return
+    await bot.send_message(
+        message.chat.id,
+        "🎨 Генерация запущена. Результат придёт в этот чат.",
+    )
 
 
 async def handle_unsupported_message(message: Message, *, bot: Bot) -> None:
@@ -241,10 +570,57 @@ def create_router(
     *,
     settings: AppSettings,
     session_factory: async_sessionmaker[AsyncSession],
+    custom_color_service: CustomColorCreator = None,
+    job_acceptance_service: JobAcceptor = None,
 ) -> Router:
     """Build the three ordered private-chat handlers."""
 
     router = Router(name="car-wrap-private-ingress")
+    pending_custom_color_uploads: CustomColorUploads = {}
+
+    @router.callback_query(F.data == CUSTOM_COLOR_REQUEST_CALLBACK_DATA)
+    async def custom_color_request_handler(callback: CallbackQuery, bot: Bot) -> None:
+        await bot.answer_callback_query(callback.id)
+        if isinstance(callback.message, Message):
+            await handle_custom_color_request(
+                callback.message,
+                bot=bot,
+                pending_uploads=pending_custom_color_uploads,
+            )
+
+    @router.callback_query(F.data.startswith(CUSTOM_COLOR_STRUCTURE_PREFIX))
+    async def custom_color_structure_handler(
+        callback: CallbackQuery,
+        bot: Bot,
+    ) -> None:
+        await handle_custom_color_structure(
+            callback,
+            bot=bot,
+            pending_uploads=pending_custom_color_uploads,
+        )
+
+    @router.callback_query(F.data.startswith(CUSTOM_COLOR_FINISH_PREFIX))
+    async def custom_color_finish_handler(
+        callback: CallbackQuery,
+        bot: Bot,
+    ) -> None:
+        await handle_custom_color_finish(
+            callback,
+            bot=bot,
+            pending_uploads=pending_custom_color_uploads,
+        )
+
+    @router.callback_query(F.data.startswith(CUSTOM_COLOR_GENERATE_PREFIX))
+    async def custom_color_generate_handler(callback: CallbackQuery, bot: Bot) -> None:
+        if job_acceptance_service is None:
+            await bot.answer_callback_query(callback.id, show_alert=True)
+            return
+        await handle_custom_color_generate(
+            callback,
+            bot=bot,
+            job_acceptance_service=job_acceptance_service,
+            session_factory=session_factory,
+        )
 
     @router.callback_query(F.data == MENU_CALLBACK_DATA)
     async def menu_handler(callback: CallbackQuery, bot: Bot) -> None:
@@ -262,14 +638,37 @@ def create_router(
         )
 
     @router.message(CommandStart(), F.chat.type == ChatType.PRIVATE)
-    async def start_handler(message: Message, bot: Bot) -> None:
-        await handle_start_message(message, bot=bot)
+    async def start_handler(
+        message: Message,
+        bot: Bot,
+        command: CommandObject,
+    ) -> None:
+        await handle_start_message(
+            message,
+            bot=bot,
+            command=command,
+            pending_uploads=pending_custom_color_uploads,
+        )
 
     @router.message(
         F.chat.type == ChatType.PRIVATE,
         F.photo | F.document,
     )
     async def media_handler(message: Message, bot: Bot) -> None:
+        if (
+            custom_color_service is not None
+            and message.from_user is not None
+            and message.from_user.id in pending_custom_color_uploads
+        ):
+            await handle_custom_color_message(
+                message,
+                bot=bot,
+                settings=settings,
+                session_factory=session_factory,
+                custom_color_service=custom_color_service,
+                pending_uploads=pending_custom_color_uploads,
+            )
+            return
         await handle_media_message(
             message,
             bot=bot,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, suppress
 from dataclasses import dataclass
@@ -29,6 +30,11 @@ from car_wrap.bot.media import (
     read_snapshotted_media,
 )
 from car_wrap.config import AppSettings
+from car_wrap.custom_colors.analysis import (
+    ReferenceAnalysisError,
+    ReferenceProfile,
+    build_clean_reference,
+)
 from car_wrap.custom_colors.storage import PrivateStorage
 from car_wrap.eval.image_validation import ImageValidationError, validate_image_bytes
 from car_wrap.generation.contracts import (
@@ -355,7 +361,31 @@ class GenerationWorkerService:
             or version.sha256 != attempt.custom_color_sha256
         ):
             raise CustomReferenceError
-        return custom_intent(version), reference
+        profile_data = getattr(version, "color_profile", None)
+        if profile_data is None:
+            if getattr(version, "color_structure", None) in {"solid", "multicolor"}:
+                raise CustomReferenceError
+            return custom_intent(version), reference
+        try:
+            profile = ReferenceProfile.from_dict(profile_data)
+            cleaned = await asyncio.to_thread(build_clean_reference, reference, profile)
+            cleaned_validation = validate_image_bytes(
+                cleaned,
+                max_width=512,
+                max_height=512,
+                max_pixels=512 * 512,
+            )
+        except (ReferenceAnalysisError, ValueError, ImageValidationError):
+            raise CustomReferenceError from None
+        if cleaned_validation.image_format != "png":
+            raise CustomReferenceError
+        return (
+            custom_intent(
+                version,
+                provider_reference_sha256=hashlib.sha256(cleaned).hexdigest(),
+            ),
+            cleaned,
+        )
 
     async def _heartbeat_loop(
         self,

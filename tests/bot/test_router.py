@@ -12,9 +12,17 @@ from aiogram.types import Document, PhotoSize
 from PIL import Image
 
 from car_wrap.bot.router import (
+    CUSTOM_COLOR_FINISH_COPY,
+    CUSTOM_COLOR_REQUEST_COPY,
+    CUSTOM_COLOR_STRUCTURE_COPY,
     NO_SOURCE_COPY,
     UNSUPPORTED_MESSAGE_COPY,
+    CustomColorUploadState,
     create_router,
+    handle_custom_color_finish,
+    handle_custom_color_message,
+    handle_custom_color_request,
+    handle_custom_color_structure,
     handle_media_message,
     handle_menu_callback,
     handle_replace_photo_cancel_callback,
@@ -86,6 +94,7 @@ class FakeBot:
         self.payload = payload
         self.download_failure = download_failure
         self.sent: list[dict[str, Any]] = []
+        self.edited: list[dict[str, Any]] = []
         self.answered_callbacks: list[str] = []
 
     async def download(self, file: str, destination: Any) -> None:
@@ -99,8 +108,12 @@ class FakeBot:
         chat_id: int,
         text: str,
         **kwargs: Any,
-    ) -> None:
+    ) -> SimpleNamespace:
         self.sent.append({"chat_id": chat_id, "text": text, **kwargs})
+        return SimpleNamespace(message_id=100 + len(self.sent))
+
+    async def edit_message_text(self, **kwargs: Any) -> None:
+        self.edited.append(kwargs)
 
     async def answer_callback_query(self, callback_query_id: str) -> None:
         self.answered_callbacks.append(callback_query_id)
@@ -161,6 +174,88 @@ async def test_start_and_unsupported_copy_are_exact() -> None:
 
     assert bot.sent[0]["text"] == NO_SOURCE_COPY
     assert bot.sent[1]["text"] == UNSUPPORTED_MESSAGE_COPY
+
+
+@pytest.mark.asyncio
+async def test_custom_color_flow_collects_two_independent_axes_before_file() -> None:
+    bot = FakeBot(jpeg())
+    sessions = FakeSessions()
+    uploads: dict[int, CustomColorUploadState] = {}
+    incoming = message()
+
+    await handle_custom_color_request(
+        incoming,
+        bot=bot,
+        pending_uploads=uploads,
+    )
+    assert bot.sent[-1]["text"] == CUSTOM_COLOR_STRUCTURE_COPY
+    structure_buttons = bot.sent[-1]["reply_markup"].inline_keyboard[0]
+    assert [button.text for button in structure_buttons] == [
+        "Однотонная",
+        "Многоцветная",
+    ]
+
+    await handle_custom_color_structure(
+        SimpleNamespace(
+            id="structure",
+            data="custom_color:structure:multicolor",
+            from_user=SimpleNamespace(id=1001),
+            message=incoming,
+        ),
+        bot=bot,
+        pending_uploads=uploads,
+    )
+    assert bot.sent[-1]["text"] == CUSTOM_COLOR_FINISH_COPY
+    finish_buttons = bot.sent[-1]["reply_markup"].inline_keyboard[0]
+    assert [button.text for button in finish_buttons] == ["Матовая", "Сатин"]
+
+    await handle_custom_color_finish(
+        SimpleNamespace(
+            id="finish",
+            data="custom_color:finish:satin",
+            from_user=SimpleNamespace(id=1001),
+            message=incoming,
+        ),
+        bot=bot,
+        pending_uploads=uploads,
+    )
+    assert bot.sent[-1]["text"] == CUSTOM_COLOR_REQUEST_COPY
+    assert uploads[1001] == CustomColorUploadState("multicolor", "satin")
+
+    class Service:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def create(self, session: object, **kwargs: Any) -> SimpleNamespace:
+            del session
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                id="9af2285a-7e61-4b7c-906f-a5bedcd5f313",
+                display_name="Без названия",
+                status="needs_review",
+                current_version=1,
+            )
+
+    service = Service()
+    document = Document(
+        file_id="sample-file",
+        file_unique_id="sample-unique",
+        file_name="sample.jpg",
+        mime_type="image/jpeg",
+    )
+    await handle_custom_color_message(
+        message(media=document),
+        bot=bot,
+        settings=settings(),
+        session_factory=sessions,
+        custom_color_service=service,
+        pending_uploads=uploads,
+    )
+
+    assert service.calls[0]["color_structure"] == "multicolor"
+    assert service.calls[0]["finish"] == "satin"
+    assert 1001 not in uploads
+    assert bot.edited[-1]["text"].startswith("Образец получен")
 
 
 @pytest.mark.asyncio
@@ -328,4 +423,4 @@ async def test_download_failure_is_sanitized() -> None:
 def test_router_registers_private_start_media_and_fallback_handlers() -> None:
     router = create_router(settings=settings(), session_factory=FakeSessions())
     assert len(router.message.handlers) == 3
-    assert len(router.callback_query.handlers) == 2
+    assert len(router.callback_query.handlers) == 6

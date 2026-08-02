@@ -6,6 +6,7 @@ import base64
 import hashlib
 from typing import Any
 
+from car_wrap.custom_colors.analysis import ReferenceProfile
 from car_wrap.generation.contracts import (
     BuiltInColorIntent,
     CustomColorIntent,
@@ -50,9 +51,11 @@ def build_generation_payload(
             "reflections, background, wheels, glass, trim, badges and plates."
         )
     else:
+        expected_reference_sha256 = intent.provider_reference_sha256 or intent.sha256
         if (
             color_reference_bytes is None
-            or hashlib.sha256(color_reference_bytes).hexdigest() != intent.sha256
+            or hashlib.sha256(color_reference_bytes).hexdigest()
+            != expected_reference_sha256
         ):
             raise ValueError("custom color reference integrity mismatch")
         references.append(
@@ -61,12 +64,38 @@ def build_generation_payload(
                 "image_url": {"url": _data_url(color_reference_bytes, "image/png")},
             }
         )
+        if intent.color_profile is None:
+            material_intent = (
+                "Treat the second image as the sole target wrap color and finish "
+                "reference."
+            )
+        else:
+            profile = ReferenceProfile.from_dict(intent.color_profile)
+            if intent.color_structure == "solid":
+                material_intent = (
+                    "Treat the second image as the sole target material reference. "
+                    f"Its authoritative sRGB base color is {profile.base_rgb_hex} "
+                    f"and its finish is {intent.finish}."
+                )
+            else:
+                palette_text = ", ".join(
+                    f"{entry.rgb_hex} at {round(entry.weight * 100)}%"
+                    for entry in profile.palette
+                )
+                material_intent = (
+                    "Treat the second image as the sole target material reference. "
+                    "It represents an angle-dependent multicolor wrap with the "
+                    f"weighted palette {palette_text} and {intent.finish} finish. "
+                    "Express the palette through material response to light and "
+                    "viewing angle; do not reproduce its layout as stripes, panels, "
+                    "decals, or a literal spatial gradient."
+                )
         prompt = (
-            "Use the first image as the vehicle source and the second image "
-            "only as the target wrap color and finish reference. Recolor all "
-            "visible painted vehicle body surfaces to match that material. "
-            "Preserve vehicle geometry, identity, viewpoint, parts, lighting, "
-            "reflections, background, wheels, glass, trim, badges and plates."
+            "Use the first image as the vehicle source. "
+            f"{material_intent} Recolor all visible painted vehicle body surfaces "
+            "to match that material. Preserve vehicle geometry, identity, viewpoint, "
+            "parts, lighting, reflections, background, wheels, glass, trim, badges "
+            "and plates."
         )
     return {
         "model": model,

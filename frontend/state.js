@@ -1,4 +1,6 @@
 const MODES = new Set(["colors", "users", "surprise"]);
+const CATALOG_STRUCTURES = new Set(["all", "solid", "multicolor"]);
+const CATALOG_FINISHES = new Set(["all", "matte", "satin"]);
 
 function freezeState(value) {
   return Object.freeze({
@@ -21,6 +23,8 @@ export function createAppState() {
     adminQueue: [],
     catalogCursor: null,
     catalogLoading: false,
+    catalogStructure: "all",
+    catalogFinish: "all",
     selectedId: null,
     flippedId: null,
     submissionUuid: null,
@@ -116,6 +120,29 @@ export function loadCustomCatalog(
 
 export function setCatalogLoading(state, loading) {
   return freezeState({...state, catalogLoading: loading});
+}
+
+export function setCatalogFilter(state, axis, value) {
+  const allowed =
+    axis === "structure"
+      ? CATALOG_STRUCTURES
+      : axis === "finish"
+        ? CATALOG_FINISHES
+        : null;
+  if (allowed === null || !allowed.has(value) || state.catalogLoading) {
+    return state;
+  }
+  const key = axis === "structure" ? "catalogStructure" : "catalogFinish";
+  if (state[key] === value) {
+    return state;
+  }
+  return freezeState({
+    ...state,
+    [key]: value,
+    customColors: [],
+    catalogCursor: null,
+    flippedId: null,
+  });
 }
 
 export function loadOwnerColors(state, items) {

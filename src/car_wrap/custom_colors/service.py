@@ -9,9 +9,16 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from car_wrap.custom_colors.analysis import (
+    ANALYSIS_REVISION,
+    ColorStructure,
+    ReferenceAnalysisError,
+    ReferenceProfile,
+    SurfaceFinish,
+    analyze_reference,
+)
 from car_wrap.custom_colors.media import CanonicalImage
 from car_wrap.custom_colors.moderation import (
-    ColorNameResult,
     ModerationDisposition,
     ModerationResult,
     normalize_display_name,
@@ -47,6 +54,15 @@ class Repository(Protocol):
         result: ModerationResult,
         provider_model: str,
     ) -> Any: ...
+
+    async def apply_analysis(
+        self,
+        session: AsyncSession,
+        *,
+        color_id: UUID,
+        analysis_revision: str,
+        color_profile: dict[str, object],
+    ) -> None: ...
 
     async def release(
         self,
@@ -85,7 +101,10 @@ class Repository(Protocol):
 
 Normalize = Callable[[bytes, str], CanonicalImage]
 Moderate = Callable[[bytes], Awaitable[ModerationResult]]
-ExtractName = Callable[[bytes], Awaitable[ColorNameResult]]
+Analyze = Callable[
+    [bytes, ColorStructure, SurfaceFinish, ModerationResult],
+    ReferenceProfile,
+]
 
 
 class CustomColorService:
@@ -96,14 +115,14 @@ class CustomColorService:
         repository: Repository,
         normalize: Normalize,
         moderate: Moderate,
-        extract_name: ExtractName | None = None,
+        analyze: Analyze = analyze_reference,
         moderation_model: str,
     ) -> None:
         self._storage = storage
         self._repository = repository
         self._normalize = normalize
         self._moderate = moderate
-        self._extract_name = extract_name
+        self._analyze = analyze
         self._moderation_model = moderation_model
 
     async def create(
@@ -115,19 +134,24 @@ class CustomColorService:
         upload: bytes,
         declared_mime: str,
         idempotency_key: str,
+        color_structure: ColorStructure | str = ColorStructure.UNSPECIFIED,
+        finish: SurfaceFinish | str = SurfaceFinish.UNSPECIFIED,
     ) -> Any:
         if owner_id <= 0:
             raise ValueError("owner ID must be positive")
         if not _IDEMPOTENCY_PATTERN.fullmatch(idempotency_key):
             raise ValueError("invalid idempotency key")
+        try:
+            normalized_structure = ColorStructure(color_structure)
+            normalized_finish = SurfaceFinish(finish)
+        except ValueError:
+            raise ValueError("invalid custom color metadata") from None
+        if (normalized_structure is ColorStructure.UNSPECIFIED) != (
+            normalized_finish is SurfaceFinish.UNSPECIFIED
+        ):
+            raise ValueError("color structure and finish must be selected together")
         canonical = self._normalize(upload, declared_mime)
-        normalized_name = display_name
-        if not normalized_name:
-            if self._extract_name is not None:
-                extracted = await self._extract_name(canonical.data)
-                normalized_name = extracted.name or ""
-            if not normalized_name:
-                normalized_name = "Без названия"
+        normalized_name = display_name or "Без названия"
         normalized_name = normalize_display_name(normalized_name)
         stored = self._storage.put(canonical.data)
         if stored.sha256 != canonical.sha256 or stored.byte_size != len(canonical.data):
@@ -144,6 +168,8 @@ class CustomColorService:
                     byte_size=stored.byte_size,
                     width=canonical.width,
                     height=canonical.height,
+                    color_structure=normalized_structure.value,
+                    finish=normalized_finish.value,
                 ),
             )
             await session.commit()
@@ -160,7 +186,36 @@ class CustomColorService:
                 0,
                 0,
             )
+        profile: ReferenceProfile | None = None
+        if (
+            normalized_structure is not ColorStructure.UNSPECIFIED
+            and result.disposition is not ModerationDisposition.REJECTED
+        ):
+            try:
+                profile = self._analyze(
+                    canonical.data,
+                    normalized_structure,
+                    normalized_finish,
+                    result,
+                )
+            except ReferenceAnalysisError:
+                result = ModerationResult(
+                    ModerationDisposition.NEEDS_REVIEW,
+                    "reference_analysis_uncertain",
+                    result.safety_confidence,
+                    result.domain_confidence,
+                    result.material_regions,
+                    result.excluded_regions,
+                    result.localization_confidence,
+                )
         try:
+            if profile is not None:
+                await self._repository.apply_analysis(
+                    session,
+                    color_id=color.id,
+                    analysis_revision=ANALYSIS_REVISION,
+                    color_profile=profile.to_dict(),
+                )
             color = await self._repository.apply_moderation(
                 session,
                 color_id=color.id,

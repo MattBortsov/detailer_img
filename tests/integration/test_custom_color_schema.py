@@ -31,13 +31,20 @@ from car_wrap.db.models import (
 pytestmark = pytest.mark.postgresql
 
 
-def version_input(key: str) -> VersionInput:
+def version_input(
+    key: str,
+    *,
+    color_structure: str = "unspecified",
+    finish: str = "unspecified",
+) -> VersionInput:
     return VersionInput(
         object_key=key,
         sha256="a" * 64,
         byte_size=128,
         width=64,
         height=64,
+        color_structure=color_structure,
+        finish=finish,
     )
 
 
@@ -69,6 +76,87 @@ async def test_version_constraints(database_engine: AsyncEngine) -> None:
                 )
             )
 
+
+@pytest.mark.asyncio
+async def test_reference_profile_metadata_is_constrained_and_immutable(
+    database_engine: AsyncEngine,
+) -> None:
+    sessions = async_sessionmaker(database_engine, expire_on_commit=False)
+    repository = CustomColorRepository(quota=20)
+    async with sessions() as session:
+        color = await repository.create(
+            session,
+            owner_id=202,
+            display_name="Red Matte",
+            version=version_input(
+                "aa/bb/" + "7" * 32 + ".png",
+                color_structure="solid",
+                finish="matte",
+            ),
+        )
+        await repository.apply_analysis(
+            session,
+            color_id=color.id,
+            analysis_revision="reference-v1",
+            color_profile={"structure": "solid", "base_rgb_hex": "#C63228"},
+        )
+        with pytest.raises(ValueError, match="immutable"):
+            await repository.apply_analysis(
+                session,
+                color_id=color.id,
+                analysis_revision="reference-v2",
+                color_profile={"structure": "solid", "base_rgb_hex": "#000000"},
+            )
+        await session.commit()
+
+    async with sessions() as session:
+        version = await session.scalar(
+            select(CustomColorVersion).where(
+                CustomColorVersion.custom_color_id == color.id
+            )
+        )
+    assert version is not None
+    assert version.color_structure == "solid"
+    assert version.finish == "matte"
+    assert version.analysis_revision == "reference-v1"
+    assert version.color_profile == {
+        "structure": "solid",
+        "base_rgb_hex": "#C63228",
+    }
+    with pytest.raises(IntegrityError):
+        async with database_engine.begin() as connection:
+            await connection.execute(
+                CustomColorVersion.__table__.update()
+                .where(CustomColorVersion.id == version.id)
+                .values(color_structure="gradient", finish="gloss")
+            )
+
+
+@pytest.mark.asyncio
+async def test_profiled_reference_cannot_be_approved_without_analysis(
+    database_engine: AsyncEngine,
+) -> None:
+    sessions = async_sessionmaker(database_engine, expire_on_commit=False)
+    repository = CustomColorRepository(quota=20)
+    async with sessions() as session:
+        color = await repository.create(
+            session,
+            owner_id=203,
+            display_name="Uncertain Red",
+            version=version_input(
+                "aa/bb/" + "8" * 32 + ".png",
+                color_structure="solid",
+                finish="satin",
+            ),
+        )
+        with pytest.raises(InvalidTransitionError, match="successful analysis"):
+            await repository.transition(
+                session,
+                color_id=color.id,
+                target=ColorStatus.APPROVED,
+                admin_actor_id=1,
+                admin_action="approve",
+            )
 
 @pytest.mark.asyncio
 async def test_quota_is_atomic_per_owner(database_engine: AsyncEngine) -> None:

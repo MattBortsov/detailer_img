@@ -9,9 +9,7 @@ import pytest
 
 from car_wrap.custom_colors.moderation import (
     ModerationDisposition,
-    build_color_name_payload,
     build_moderation_payload,
-    extract_color_name,
     moderate_reference,
     normalize_display_name,
 )
@@ -26,6 +24,13 @@ def response_payload(**overrides: object) -> dict[str, object]:
         "wrap_reference": True,
         "safety_confidence": 98,
         "domain_confidence": 96,
+        "material_regions": [
+            {"x": 100, "y": 120, "width": 700, "height": 650}
+        ],
+        "excluded_regions": [
+            {"x": 300, "y": 300, "width": 120, "height": 80}
+        ],
+        "localization_confidence": 93,
         "reason_code": "approved",
     }
     decision.update(overrides)
@@ -58,6 +63,10 @@ async def test_moderation_decision_matrix(
             model="google/gemini-2.5-flash",
         )
     assert result.disposition is expected
+    if expected is ModerationDisposition.APPROVED:
+        assert result.material_regions[0].x == 100
+        assert result.excluded_regions[0].width == 120
+        assert result.localization_confidence == 93
 
 
 @pytest.mark.asyncio
@@ -86,6 +95,26 @@ async def test_provider_failures_and_invalid_schema_need_review() -> None:
                 model="google/gemini-2.5-flash",
             )
         assert result.disposition is ModerationDisposition.NEEDS_REVIEW
+
+
+@pytest.mark.asyncio
+async def test_out_of_bounds_or_excessive_regions_need_review() -> None:
+    invalid_regions = response_payload(
+        material_regions=[{"x": 900, "y": 0, "width": 200, "height": 500}]
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=invalid_regions)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await moderate_reference(
+            b"canonical",
+            client=client,
+            api_key=None,
+            model="google/gemini-2.5-flash",
+        )
+    assert result.disposition is ModerationDisposition.NEEDS_REVIEW
+    assert result.material_regions == ()
 
 
 @pytest.mark.asyncio
@@ -130,29 +159,6 @@ def test_payload_is_server_owned_and_contains_no_display_name() -> None:
     assert "Injected user name" not in rendered
     assert payload["response_format"]["json_schema"]["strict"] is True
     assert payload["provider"]["require_parameters"] is True
-
-
-@pytest.mark.asyncio
-async def test_extracts_only_a_clearly_printed_name() -> None:
-    body = {
-        "choices": [
-            {"message": {"content": json.dumps({"detected_name": " Avery Satin "})}}
-        ]
-    }
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=body)
-
-    payload = build_color_name_payload(b"canonical", model="vision-model")
-    assert payload["response_format"]["json_schema"]["strict"] is True
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await extract_color_name(
-            b"canonical",
-            client=client,
-            api_key=None,
-            model="vision-model",
-        )
-    assert result.name == "Avery Satin"
 
 
 @pytest.mark.parametrize(

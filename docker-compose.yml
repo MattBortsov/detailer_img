@@ -212,12 +212,19 @@ services:
     tmpfs:
       - /tmp:size=32m,mode=1777
     environment: *app-environment
+    volumes:
+      - custom_color_data:/var/lib/car-wrap/custom-colors
+      - clamav_socket:/run/clamav:ro
     networks:
       - backend
       - edge
     depends_on:
       postgres:
         condition: service_healthy
+      clamav:
+        condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
     mem_limit: 256m

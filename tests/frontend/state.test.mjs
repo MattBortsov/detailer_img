@@ -11,6 +11,7 @@ import {
   loadPalette,
   resetUpload,
   selectChoice,
+  setCatalogFilter,
   setFlipped,
   startUpload,
 } from "../../frontend/state.js";
@@ -85,6 +86,21 @@ test("community pagination preserves server order and deduplicates", () => {
     ["Newest", "Older", "Oldest"],
   );
   assert.equal(second.catalogCursor, null);
+});
+
+test("community filters are independent and reset pagination", () => {
+  const loaded = loadCustomCatalog(createAppState(), {
+    items: [{selection_id: "custom:a:v1", name: "A", preview_url: "/one"}],
+    nextCursor: "next",
+  });
+  const solid = setCatalogFilter(loaded, "structure", "solid");
+  const satin = setCatalogFilter(solid, "finish", "satin");
+
+  assert.equal(satin.catalogStructure, "solid");
+  assert.equal(satin.catalogFinish, "satin");
+  assert.deepEqual(satin.customColors, []);
+  assert.equal(satin.catalogCursor, null);
+  assert.equal(setCatalogFilter(satin, "finish", "metallic"), satin);
 });
 
 test("named and Surprise selections enable submission without global CTA copy", () => {

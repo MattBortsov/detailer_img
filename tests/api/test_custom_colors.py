@@ -111,7 +111,32 @@ async def test_creation_accepts_exactly_name_and_one_image() -> None:
     assert response.status_code == 202
     assert response.json()["status"] == "needs_review"
     assert service.calls[0]["owner_id"] == 1001
+    assert service.calls[0]["color_structure"] == "unspecified"
+    assert service.calls[0]["finish"] == "unspecified"
     assert "telegram_user_id" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_creation_accepts_explicit_structure_and_finish() -> None:
+    service = Service()
+    async with AsyncClient(
+        transport=ASGITransport(app=app_with(service)),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/custom-colors",
+            headers={"Idempotency-Key": "upload-profiled"},
+            files={
+                "name": (None, "Dream Grey Charm Purple"),
+                "color_structure": (None, "multicolor"),
+                "finish": (None, "satin"),
+                "image": ("sample.png", b"\x89PNG\r\n\x1a\nbytes", "image/png"),
+            },
+        )
+
+    assert response.status_code == 202
+    assert service.calls[0]["color_structure"] == "multicolor"
+    assert service.calls[0]["finish"] == "satin"
 
 
 @pytest.mark.parametrize(

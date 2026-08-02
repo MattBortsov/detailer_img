@@ -7,6 +7,12 @@ from uuid import uuid4
 
 import pytest
 
+from car_wrap.custom_colors.analysis import (
+    ColorCluster,
+    ColorStructure,
+    ReferenceProfile,
+    SurfaceFinish,
+)
 from car_wrap.generation.contracts import (
     BuiltInColorIntent,
     CustomColorIntent,
@@ -60,6 +66,46 @@ def test_custom_payload_rejects_wrong_reference_digest() -> None:
             vehicle_media_type="image/jpeg",
             color_reference_bytes=b"wrong",
         )
+
+
+def test_profiled_custom_prompt_uses_only_server_owned_material_metadata() -> None:
+    reference = b"cleaned-reference"
+    profile = ReferenceProfile(
+        ColorStructure.MULTICOLOR,
+        SurfaceFinish.SATIN,
+        91,
+        (
+            ColorCluster("#51466E", (32.0, 11.0, -20.0), 0.55, (0, 0, 400, 400)),
+            ColorCluster(
+                "#B04CDD", (50.0, 54.0, -43.0), 0.45, (500, 0, 400, 400)
+            ),
+        ),
+    )
+    intent = CustomColorIntent(
+        color_id=uuid4(),
+        version_id=uuid4(),
+        version=1,
+        sha256="a" * 64,
+        object_key="private-reference.png",
+        color_structure="multicolor",
+        finish="satin",
+        color_profile=profile.to_dict(),
+        provider_reference_sha256=hashlib.sha256(reference).hexdigest(),
+    )
+    payload = build_generation_payload(
+        model="x-ai/grok-imagine-image-quality",
+        intent=intent,
+        vehicle_bytes=b"vehicle",
+        vehicle_media_type="image/jpeg",
+        color_reference_bytes=reference,
+    )
+
+    assert len(payload["input_references"]) == 2
+    assert "#51466E" in payload["prompt"]
+    assert "#B04CDD" in payload["prompt"]
+    assert "satin" in payload["prompt"]
+    assert "stripes" in payload["prompt"]
+    assert intent.object_key not in str(payload)
 
 
 @pytest.mark.parametrize(

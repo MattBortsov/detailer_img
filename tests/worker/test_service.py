@@ -13,6 +13,12 @@ import pytest
 from PIL import Image
 
 from car_wrap.config import AppSettings
+from car_wrap.custom_colors.analysis import (
+    ColorCluster,
+    ColorStructure,
+    ReferenceProfile,
+    SurfaceFinish,
+)
 from car_wrap.db.models import CustomColorVersion
 from car_wrap.generation.provider import (
     ProviderFailure,
@@ -308,6 +314,57 @@ async def test_custom_uses_exact_digest_verified_second_reference() -> None:
     assert provider.payloads[0]["input_references"][1]["image_url"]["url"].startswith(
         "data:image/png;base64,"
     )
+
+
+async def test_profiled_custom_replaces_original_with_cleaned_reference() -> None:
+    version_id = uuid4()
+    profile = ReferenceProfile(
+        ColorStructure.SOLID,
+        SurfaceFinish.MATTE,
+        90,
+        (
+            ColorCluster(
+                "#B47828",
+                (55.0, 20.0, 48.0),
+                1.0,
+                (100, 100, 400, 400),
+            ),
+        ),
+    )
+    version = CustomColorVersion(
+        id=version_id,
+        custom_color_id=uuid4(),
+        version=2,
+        object_key="aa/bb/" + "d" * 32 + ".png",
+        sha256=hashlib.sha256(CUSTOM_REFERENCE).hexdigest(),
+        byte_size=len(CUSTOM_REFERENCE),
+        width=300,
+        height=260,
+        color_structure="solid",
+        finish="matte",
+        analysis_revision="reference-v1",
+        color_profile=profile.to_dict(),
+        retain_count=1,
+        created_at=NOW,
+    )
+    repository = Repository(version)
+    provider = Provider()
+    sender = Sender()
+
+    outcome = await _service(repository, provider, sender).execute(
+        _attempt(IntentKind.CUSTOM, custom_version_id=version_id)
+    )
+
+    assert outcome.error_code is None
+    encoded = provider.payloads[0]["input_references"][1]["image_url"]["url"]
+    import base64
+
+    cleaned = base64.b64decode(encoded.split(",", 1)[1])
+    assert cleaned != CUSTOM_REFERENCE
+    with Image.open(BytesIO(cleaned)) as image:
+        assert image.size == (512, 512)
+    assert "#B47828" in provider.payloads[0]["prompt"]
+    assert "Мой бронзовый" not in provider.payloads[0]["prompt"]
 
 
 @pytest.mark.parametrize(

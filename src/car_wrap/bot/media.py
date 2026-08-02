@@ -152,16 +152,11 @@ async def read_supported_media(
 ) -> AcceptedMedia:
     """Download, fully validate, then discard one bounded Telegram image."""
 
-    media_kind, declared_mime_type = _media_contract(media, settings)
+    media_kind, _declared_mime_type = _media_contract(media, settings)
     if media.file_size is not None and media.file_size > settings.max_media_bytes:
         raise MediaRejection(MediaRejectionCode.TOO_LARGE)
 
-    downloaded = await download_validated_bytes(
-        downloader,
-        file_id=media.file_id,
-        declared_mime_type=declared_mime_type,
-        settings=settings,
-    )
+    downloaded = await read_supported_media_bytes(downloader, media, settings=settings)
     return AcceptedMedia(
         telegram_file_id=media.file_id,
         telegram_file_unique_id=media.file_unique_id,
@@ -170,6 +165,25 @@ async def read_supported_media(
         byte_size=downloaded.byte_size,
         width=downloaded.width,
         height=downloaded.height,
+    )
+
+
+async def read_supported_media_bytes(
+    downloader: TelegramDownloader,
+    media: PhotoSize | Document,
+    *,
+    settings: AppSettings,
+) -> DownloadedMedia:
+    """Download one validated image while retaining bytes only in memory."""
+
+    _, declared_mime_type = _media_contract(media, settings)
+    if media.file_size is not None and media.file_size > settings.max_media_bytes:
+        raise MediaRejection(MediaRejectionCode.TOO_LARGE)
+    return await download_validated_bytes(
+        downloader,
+        file_id=media.file_id,
+        declared_mime_type=declared_mime_type,
+        settings=settings,
     )
 
 

@@ -7,19 +7,16 @@ import {
   authenticationFailed,
   beginSubmission,
   completeSubmission,
-  completeUpload,
   createAppState,
   loadAdminQueue,
   loadCustomCatalog,
   loadOwnerColors,
   loadPalette,
   paletteFailed,
-  resetUpload,
   selectChoice,
+  setCatalogFilter,
   setCatalogLoading,
   setFlipped,
-  startUpload,
-  updateUploadProgress,
 } from "./state.js";
 
 const HEX_PATTERN = /^#[0-9A-Fa-f]{6}$/;
@@ -27,14 +24,6 @@ const BOT_URL_PATTERN = /^https:\/\/t\.me\/[A-Za-z][A-Za-z0-9_]{4,31}$/;
 const SOURCE_PREVIEW_URL = "/api/v1/active-source/image";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
-const ACCEPTED_UPLOAD_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-]);
 const STATUS_COPY = Object.freeze({
   pending: "На проверке",
   needs_review: "Нужна проверка администратора",
@@ -73,26 +62,13 @@ const elements = {
   confirmDialog: document.querySelector("#confirm-color-dialog"),
   confirmSelection: document.querySelector("#confirm-color-selection"),
   closeConfirm: document.querySelector("#close-confirm-color"),
-  addDialog: document.querySelector("#add-color-dialog"),
-  addForm: document.querySelector("#add-color-form"),
   openAdd: document.querySelector("#open-add-color"),
-  closeAdd: document.querySelector("#close-add-color"),
-  imageInput: document.querySelector("#color-image"),
-  replaceImage: document.querySelector("#replace-color-image"),
-  uploadPreview: document.querySelector("#upload-preview"),
-  uploadPreviewImage: document.querySelector("#upload-preview-image"),
-  nameInput: document.querySelector("#color-name"),
-  nameCounter: document.querySelector("#color-name-counter"),
-  uploadProgress: document.querySelector("#upload-progress"),
-  uploadMessage: document.querySelector("#upload-message"),
-  dialogAlert: document.querySelector("#dialog-alert"),
-  uploadSubmit: document.querySelector("#upload-submit"),
+  catalogFilters: document.querySelector("#catalog-filters"),
 };
 
 let state = createAppState();
 let sessionExchangeAttempted = false;
 let catalogLoaded = false;
-let previewObjectUrl = null;
 let pendingColorId = null;
 let replacementInFlight = false;
 const telegram = window.Telegram?.WebApp;
@@ -213,10 +189,22 @@ function publicCard(item, kind) {
       previewUrl: null,
     };
   }
+  const structures = {
+    solid: "Однотонная",
+    multicolor: "Многоцветная",
+    unspecified: "Без категории",
+  };
+  const finishes = {
+    matte: "Матовая",
+    satin: "Сатин",
+    unspecified: "Финиш не указан",
+  };
   return {
     id: item.selection_id,
     name: item.name,
-    kindLabel: "User Color",
+    kindLabel: [structures[item.color_structure], finishes[item.finish]].join(
+      " · ",
+    ),
     displayHex: null,
     previewUrl: item.preview_url,
   };
@@ -305,6 +293,16 @@ function renderCards() {
   elements.loadMore.disabled = state.catalogLoading;
 }
 
+function renderCatalogFilters() {
+  for (const button of elements.catalogFilters.querySelectorAll("button")) {
+    const selected =
+      button.dataset.filterAxis === "structure"
+        ? state.catalogStructure === button.dataset.filterValue
+        : state.catalogFinish === button.dataset.filterValue;
+    button.ariaPressed = String(selected);
+  }
+}
+
 function statusItem(item, admin = false) {
   const row = document.createElement("div");
   row.className = "management-item";
@@ -372,22 +370,6 @@ function renderMode() {
   }
 }
 
-function renderUpload() {
-  const uploading = state.uploadState === "uploading";
-  elements.uploadSubmit.disabled = uploading;
-  elements.imageInput.disabled = uploading;
-  elements.nameInput.disabled = uploading;
-  elements.uploadProgress.hidden =
-    !uploading || state.uploadProgress === null;
-  if (state.uploadProgress !== null) {
-    elements.uploadProgress.value = state.uploadProgress;
-  }
-  elements.uploadMessage.textContent = state.uploadMessage;
-  elements.dialogAlert.hidden = state.uploadState !== "failed";
-  elements.dialogAlert.textContent =
-    state.uploadState === "failed" ? state.uploadMessage : "";
-}
-
 function render() {
   if (state.view === "booting") {
     showOnly(elements.loading);
@@ -417,9 +399,9 @@ function render() {
     elements.sourcePhotoThumbnail.src = state.sourcePreviewUrl;
   }
   renderMode();
+  renderCatalogFilters();
   renderCards();
   renderManagement();
-  renderUpload();
   elements.form.ariaBusy = String(state.inFlight);
   elements.announcement.textContent = state.announcement;
   elements.alert.hidden = ![
@@ -591,6 +573,8 @@ function validCatalog(payload) {
           "name",
           "version",
           "preview_url",
+          "color_structure",
+          "finish",
           "approved_at",
         ]) &&
         typeof item.selection_id === "string" &&
@@ -599,6 +583,10 @@ function validCatalog(payload) {
         item.version > 0 &&
         typeof item.preview_url === "string" &&
         item.preview_url.startsWith("/api/v1/custom-colors/") &&
+        ["unspecified", "solid", "multicolor"].includes(
+          item.color_structure,
+        ) &&
+        ["unspecified", "matte", "satin"].includes(item.finish) &&
         typeof item.approved_at === "string",
     ) &&
     (payload.next_cursor === null || typeof payload.next_cursor === "string")
@@ -608,10 +596,17 @@ function validCatalog(payload) {
 async function fetchCatalog(append = false) {
   state = setCatalogLoading(state, true);
   render();
-  const suffix =
-    append && state.catalogCursor
-      ? `?cursor=${encodeURIComponent(state.catalogCursor)}`
-      : "";
+  const query = new URLSearchParams();
+  if (append && state.catalogCursor) {
+    query.set("cursor", state.catalogCursor);
+  }
+  if (state.catalogStructure !== "all") {
+    query.set("structure", state.catalogStructure);
+  }
+  if (state.catalogFinish !== "all") {
+    query.set("finish", state.catalogFinish);
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
   try {
     const response = await fetchJson(`/api/v1/custom-colors${suffix}`);
     const payload = await response.json();
@@ -895,111 +890,34 @@ async function submitSelectedChoice() {
   render();
 }
 
-function revokePreview() {
-  if (previewObjectUrl !== null) {
-    URL.revokeObjectURL(previewObjectUrl);
-    previewObjectUrl = null;
-  }
-}
-
 function openAddDialog() {
-  revokePreview();
-  elements.addForm.reset();
-  elements.uploadPreview.hidden = true;
-  elements.nameCounter.textContent = "0/40";
-  state = resetUpload(state);
-  elements.addDialog.showModal();
-  telegram?.BackButton?.show();
-  elements.nameInput.focus();
-  renderUpload();
-}
-
-function closeAddDialog() {
-  elements.addDialog.close();
-  telegram?.BackButton?.hide();
-  elements.openAdd.focus({preventScroll: true});
+  const botUrl = trustedBotUrl(state.botChatUrl);
+  if (!botUrl) {
+    return;
+  }
+  openTelegramUrl(`${botUrl}?start=custom_color`);
+  telegram?.close();
 }
 
 elements.openAdd.addEventListener("click", openAddDialog);
-elements.closeAdd.addEventListener("click", closeAddDialog);
-elements.addDialog.addEventListener("cancel", () => {
-  telegram?.BackButton?.hide();
-  elements.openAdd.focus({preventScroll: true});
-});
-telegram?.BackButton?.onClick?.(() => {
-  if (elements.addDialog.open) {
-    closeAddDialog();
-  }
-});
-
-elements.imageInput.addEventListener("change", () => {
-  revokePreview();
-  const file = elements.imageInput.files?.[0];
-  if (!file) {
-    elements.uploadPreview.hidden = true;
+elements.catalogFilters.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-filter-axis]");
+  if (!(button instanceof HTMLButtonElement)) {
     return;
   }
-  if (
-    file.size > MAX_UPLOAD_BYTES ||
-    (file.type && !ACCEPTED_UPLOAD_TYPES.has(file.type))
-  ) {
-    elements.imageInput.value = "";
-    elements.dialogAlert.hidden = false;
-    elements.dialogAlert.textContent =
-      "Не удалось обработать изображение. Выберите другое фото в поддерживаемом формате.";
+  const next = setCatalogFilter(
+    state,
+    button.dataset.filterAxis,
+    button.dataset.filterValue,
+  );
+  if (next === state) {
     return;
   }
-  previewObjectUrl = URL.createObjectURL(file);
-  elements.uploadPreviewImage.src = previewObjectUrl;
-  elements.uploadPreview.hidden = false;
-  elements.dialogAlert.hidden = true;
+  state = next;
+  catalogLoaded = false;
+  render();
+  await fetchCatalog();
 });
-
-elements.replaceImage.addEventListener("click", () => elements.imageInput.click());
-elements.nameInput.addEventListener("input", () => {
-  elements.nameCounter.textContent = `${elements.nameInput.value.length}/40`;
-});
-
-function uploadColor(formData) {
-  return new Promise((resolve) => {
-    const request = new XMLHttpRequest();
-    request.open("POST", "/api/v1/custom-colors");
-    request.withCredentials = true;
-    request.setRequestHeader("Idempotency-Key", crypto.randomUUID());
-    request.upload.addEventListener("progress", (event) => {
-      state = updateUploadProgress(
-        state,
-        event.lengthComputable ? Math.round((event.loaded / event.total) * 100) : null,
-      );
-      renderUpload();
-    });
-    request.addEventListener("load", () => resolve(request.status === 202));
-    request.addEventListener("error", () => resolve(false));
-    request.send(formData);
-  });
-}
-
-elements.addForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const file = elements.imageInput.files?.[0];
-  const name = elements.nameInput.value.trim();
-  if (!file || name.length > 40) {
-    elements.dialogAlert.hidden = false;
-    elements.dialogAlert.textContent = "Добавьте одно фото. Название можно оставить пустым.";
-    return;
-  }
-  const formData = new FormData();
-  formData.append("name", name);
-  formData.append("image", file, file.name);
-  state = startUpload(state);
-  renderUpload();
-  state = completeUpload(state, (await uploadColor(formData)) ? "accepted" : "failed");
-  renderUpload();
-  if (state.uploadState === "pending") {
-    await fetchOwnerColors();
-  }
-});
-
 elements.mineList.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-management-action]");
   if (!(button instanceof HTMLButtonElement)) {
@@ -1100,5 +1018,3 @@ if (telegram) {
   state = authenticationFailed(state);
   render();
 }
-
-window.addEventListener("pagehide", revokePreview, {once: true});

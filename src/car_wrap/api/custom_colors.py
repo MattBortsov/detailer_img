@@ -76,6 +76,8 @@ def _public_item(color: CustomColor, version: CustomColorVersion) -> dict[str, A
         "preview_url": (
             f"/api/v1/custom-colors/{color.id}/versions/{version.version}/preview"
         ),
+        "color_structure": version.color_structure or "unspecified",
+        "finish": version.finish or "unspecified",
         "approved_at": color.approved_at,
     }
 
@@ -101,6 +103,8 @@ async def create_custom_color(
             upload=upload.image,
             declared_mime=upload.mime_type,
             idempotency_key=key,
+            color_structure=upload.color_structure,
+            finish=upload.finish,
         )
     except QuotaExceededError:
         raise HTTPException(
@@ -130,7 +134,7 @@ async def public_catalog(
     session: DatabaseSession,
 ) -> dict[str, Any]:
     del current
-    if set(request.query_params) - {"cursor", "limit"}:
+    if set(request.query_params) - {"cursor", "limit", "structure", "finish"}:
         raise HTTPException(status_code=400, detail="Invalid request")
     try:
         limit = int(request.query_params.get("limit", "20"))
@@ -139,6 +143,16 @@ async def public_catalog(
     if not 1 <= limit <= 50:
         raise HTTPException(status_code=400, detail="Invalid request")
     conditions: list[Any] = [CustomColor.status == ColorStatus.APPROVED.value]
+    structure = request.query_params.get("structure")
+    finish = request.query_params.get("finish")
+    if structure is not None:
+        if structure not in {"solid", "multicolor"}:
+            raise HTTPException(status_code=400, detail="Invalid request")
+        conditions.append(CustomColorVersion.color_structure == structure)
+    if finish is not None:
+        if finish not in {"matte", "satin"}:
+            raise HTTPException(status_code=400, detail="Invalid request")
+        conditions.append(CustomColorVersion.finish == finish)
     raw_cursor = request.query_params.get("cursor")
     if raw_cursor:
         approved_at, color_id = _decode_cursor(raw_cursor)
@@ -182,16 +196,23 @@ async def owner_catalog(
     current: CurrentSession,
     session: DatabaseSession,
 ) -> dict[str, Any]:
-    rows = (
+    rows = list(
         await session.execute(
-            select(CustomColor)
+            select(CustomColor, CustomColorVersion)
+            .join(
+                CustomColorVersion,
+                and_(
+                    CustomColorVersion.custom_color_id == CustomColor.id,
+                    CustomColorVersion.version == CustomColor.current_version,
+                ),
+            )
             .where(
                 CustomColor.telegram_user_id == current.telegram_user_id,
                 CustomColor.status != ColorStatus.DELETED.value,
             )
             .order_by(CustomColor.created_at.desc(), CustomColor.id.desc())
         )
-    ).scalars()
+    )
     return {
         "items": [
             {
@@ -199,8 +220,10 @@ async def owner_catalog(
                 "name": color.display_name,
                 "status": color.status,
                 "version": color.current_version,
+                "color_structure": version.color_structure or "unspecified",
+                "finish": version.finish or "unspecified",
             }
-            for color in rows
+            for color, version in rows
         ]
     }
 

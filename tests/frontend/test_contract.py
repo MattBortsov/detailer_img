@@ -133,6 +133,9 @@ def test_native_card_surfaces_flip_without_coupling_selection() -> None:
 
     assert "Палитра" not in html
     assert '"Палитра"' not in js
+    assert 'id="add-color-dialog"' not in html
+    assert "start=custom_color" in js
+    assert "new FormData" not in js
     assert html.count(warning) == 1
     assert warning not in html.split('<template id="choice-template">', 1)[1]
     assert html.index("</form>") < html.index(warning)
@@ -233,7 +236,7 @@ def test_active_photo_card_opens_full_photo_and_requests_replacement() -> None:
     assert 'id="source-photo-thumbnail"' in html
     assert "Генерация для этого фото" in html
     assert 'id="replace-source-photo"' in html
-    assert ">Заменить" in html
+    assert "Заменить" in " ".join(sources()[3].text)
     assert 'id="source-photo-dialog"' in html
     assert 'id="source-photo-full"' in html
     assert "grid-template-columns: minmax(0, 1fr) minmax(0, 3fr)" in css
@@ -265,8 +268,8 @@ def test_dark_premium_tokens_and_media_safety() -> None:
     assert "textContent" in js
 
 
-def test_add_color_sheet_has_exact_disclosure_and_iphone_formats() -> None:
-    _, _, _, parser = sources()
+def test_user_colors_hands_upload_to_bot_and_exposes_two_filter_axes() -> None:
+    html, css, js, parser = sources()
     visible = " ".join(parser.text)
     file_inputs = [
         attrs
@@ -274,26 +277,19 @@ def test_add_color_sheet_has_exact_disclosure_and_iphone_formats() -> None:
         if tag == "input" and attrs.get("type") == "file"
     ]
 
-    assert "Добавить свой цвет" in visible
-    assert (
-        "Образец будет сохранён в вашем аккаунте и после проверки станет "
-        "доступен другим пользователям."
-    ) in visible
-    assert "Фото автомобиля и результат мы не сохраняем." in visible
-    assert "Изображение обработают сервис модерации и AI-провайдер." in visible
-    assert "JPEG, PNG, WebP или HEIC/HEIF · до 8 МБ" in visible
-    assert "Отправить на проверку" in visible
-    assert file_inputs == [
-        {
-            "id": "color-image",
-            "name": "image",
-            "type": "file",
-            "accept": (
-                "image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
-            ),
-            "required": None,
-        }
-    ]
+    assert "Добавить свой цвет в боте" in visible
+    assert file_inputs == []
+    assert 'id="catalog-filters"' in html
+    assert visible.count("Однотонная") == 1
+    assert visible.count("Многоцветная") == 1
+    assert visible.count("Матовая") == 1
+    assert visible.count("Сатин") == 1
+    assert 'data-filter-axis="structure"' in html
+    assert 'data-filter-axis="finish"' in html
+    assert "setCatalogFilter" in js
+    assert 'query.set("structure", state.catalogStructure)' in js
+    assert 'query.set("finish", state.catalogFinish)' in js
+    assert '.filter-options button[aria-pressed="true"]' in css
 
 
 def test_admin_review_requires_explicit_concealed_preview_action() -> None:

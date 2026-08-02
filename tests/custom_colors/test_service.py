@@ -7,11 +7,18 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from car_wrap.custom_colors.analysis import (
+    ColorCluster,
+    ColorStructure,
+    ReferenceProfile,
+    SurfaceFinish,
+)
 from car_wrap.custom_colors.media import CanonicalImage
 from car_wrap.custom_colors.moderation import (
     ModerationDisposition,
     ModerationResult,
 )
+from car_wrap.custom_colors.repository import VersionInput
 from car_wrap.custom_colors.service import CustomColorService
 from car_wrap.custom_colors.storage import StoredObject
 
@@ -39,12 +46,29 @@ class Repository:
     def __init__(self, *, fail_create: bool = False) -> None:
         self.fail_create = fail_create
         self.applied: list[tuple[UUID, str, str]] = []
+        self.created: list[VersionInput] = []
+        self.profiles: list[dict[str, object]] = []
         self.color = Color(uuid4())
 
     async def create(self, session: object, **kwargs: object) -> Color:
         if self.fail_create:
             raise RuntimeError("database failed")
+        version = kwargs["version"]
+        assert isinstance(version, VersionInput)
+        self.created.append(version)
         return self.color
+
+    async def apply_analysis(
+        self,
+        session: object,
+        *,
+        color_id: UUID,
+        analysis_revision: str,
+        color_profile: dict[str, object],
+    ) -> None:
+        assert color_id == self.color.id
+        assert analysis_revision == "reference-v1"
+        self.profiles.append(color_profile)
 
     async def apply_moderation(
         self,
@@ -196,4 +220,110 @@ async def test_moderation_exception_fails_closed_to_review() -> None:
         idempotency_key="request-1",
     )
     assert color.status == "needs_review"
+    assert repository.applied[0][2] == "needs_review"
+
+
+@pytest.mark.asyncio
+async def test_selected_structure_and_finish_persist_analyzed_profile() -> None:
+    repository = Repository()
+
+    async def moderate(data: bytes) -> ModerationResult:
+        return ModerationResult(
+            ModerationDisposition.APPROVED,
+            "approved",
+            98,
+            97,
+        )
+
+    def analyze(
+        data: bytes,
+        structure: ColorStructure,
+        finish: SurfaceFinish,
+        result: ModerationResult,
+    ) -> ReferenceProfile:
+        assert structure is ColorStructure.SOLID
+        assert finish is SurfaceFinish.MATTE
+        assert result.disposition is ModerationDisposition.APPROVED
+        return ReferenceProfile(
+            structure,
+            finish,
+            92,
+            (
+                ColorCluster(
+                    "#C83228",
+                    (45.0, 58.0, 43.0),
+                    1.0,
+                    (100, 100, 200, 200),
+                ),
+            ),
+        )
+
+    service = CustomColorService(
+        storage=Storage(),
+        repository=repository,
+        normalize=lambda data, mime: CanonicalImage(
+            b"png", "image/png", 80, 60, "d" * 64
+        ),
+        moderate=moderate,
+        analyze=analyze,
+        moderation_model="vision-model",
+    )
+    color = await service.create(
+        Session(),
+        owner_id=42,
+        display_name="Red",
+        upload=b"source",
+        declared_mime="image/png",
+        idempotency_key="request-profile",
+        color_structure="solid",
+        finish="matte",
+    )
+
+    assert color.status == "approved"
+    version = repository.created[0]
+    assert version.color_structure == "solid"
+    assert version.finish == "matte"
+    assert repository.profiles[0]["base_rgb_hex"] == "#C83228"
+
+
+@pytest.mark.asyncio
+async def test_uncertain_analysis_prevents_automatic_approval() -> None:
+    repository = Repository()
+
+    async def moderate(data: bytes) -> ModerationResult:
+        return ModerationResult(
+            ModerationDisposition.APPROVED,
+            "approved",
+            98,
+            97,
+        )
+
+    def uncertain(*args: object) -> ReferenceProfile:
+        from car_wrap.custom_colors.analysis import ReferenceAnalysisError
+
+        raise ReferenceAnalysisError("uncertain")
+
+    service = CustomColorService(
+        storage=Storage(),
+        repository=repository,
+        normalize=lambda data, mime: CanonicalImage(
+            b"png", "image/png", 80, 60, "d" * 64
+        ),
+        moderate=moderate,
+        analyze=uncertain,
+        moderation_model="vision-model",
+    )
+    color = await service.create(
+        Session(),
+        owner_id=42,
+        display_name="Unknown",
+        upload=b"source",
+        declared_mime="image/png",
+        idempotency_key="request-uncertain",
+        color_structure="multicolor",
+        finish="satin",
+    )
+
+    assert color.status == "needs_review"
+    assert repository.profiles == []
     assert repository.applied[0][2] == "needs_review"

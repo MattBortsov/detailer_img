@@ -87,6 +87,35 @@ Replace each value with an independent integer score from 1 through 5 after
 review. Do not collapse dimensions into an overall impression. Record
 measurements from the run artifact rather than estimates.
 
+### Custom wrap-reference fidelity gate
+
+Before a profiled custom reference is released, run the deterministic offline
+extraction fixtures:
+
+```bash
+.venv/bin/python -m pytest tests/custom_colors/test_analysis.py tests/eval -x
+```
+
+The focused fixtures must demonstrate all of the following:
+
+- a solid sample remains in the intended hue family after unrelated
+  background, printed text, highlights, and shadows are rejected;
+- a multicolor or chameleon sample retains two to five supported palette
+  colors instead of collapsing to one average;
+- uncertain or mismatched samples fail closed and cannot be auto-approved;
+- matte/satin and solid/multicolor values survive profile validation as
+  server-owned metadata.
+
+Offline extraction success does not prove generated-output quality. Add
+authorized vehicle cases for each custom-reference family to the existing
+locked corpus, score `color_intent` for hue-family and transition fidelity, and
+score `lighting_material` for matte/satin plausibility. Do not claim exact
+physical, SKU, camera-independent, or display-independent matching.
+
+Each paid corpus case still receives at most one provider attempt per explicit
+run. A weak result fails the release gate; it never triggers automatic
+per-job regeneration.
+
 ## 4. Bind evidence and decide the release gate
 
 Use the same manifest and the exact run artifact produced by generation:

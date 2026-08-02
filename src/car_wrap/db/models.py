@@ -20,6 +20,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -241,6 +242,14 @@ class CustomColorVersion(Base):
         CheckConstraint("width > 0", name="width_positive"),
         CheckConstraint("height > 0", name="height_positive"),
         CheckConstraint("retain_count >= 0", name="retain_count_nonnegative"),
+        CheckConstraint(
+            "color_structure IN ('unspecified', 'solid', 'multicolor')",
+            name="color_structure_supported",
+        ),
+        CheckConstraint(
+            "finish IN ('unspecified', 'matte', 'satin')",
+            name="finish_supported",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -259,6 +268,26 @@ class CustomColorVersion(Base):
     byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     width: Mapped[int] = mapped_column(Integer, nullable=False)
     height: Mapped[int] = mapped_column(Integer, nullable=False)
+    color_structure: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="unspecified",
+        server_default="unspecified",
+    )
+    finish: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="unspecified",
+        server_default="unspecified",
+    )
+    analysis_revision: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
+    color_profile: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
     retain_count: Mapped[int] = mapped_column(
         Integer,
         nullable=False,

@@ -107,8 +107,26 @@
                 <p>Цвета, добавленные пользователями и прошедшие проверку.</p>
               </div>
               <button class="secondary-button" id="open-add-color" type="button">
-                Добавить свой цвет
+                Добавить свой цвет в боте
               </button>
+            </div>
+            <div class="catalog-filters" id="catalog-filters" aria-label="Фильтры пользовательских цветов">
+              <fieldset>
+                <legend>Структура цвета</legend>
+                <div class="filter-options">
+                  <button type="button" data-filter-axis="structure" data-filter-value="all" aria-pressed="true">Все</button>
+                  <button type="button" data-filter-axis="structure" data-filter-value="solid" aria-pressed="false">Однотонная</button>
+                  <button type="button" data-filter-axis="structure" data-filter-value="multicolor" aria-pressed="false">Многоцветная</button>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>Финиш</legend>
+                <div class="filter-options">
+                  <button type="button" data-filter-axis="finish" data-filter-value="all" aria-pressed="true">Все</button>
+                  <button type="button" data-filter-axis="finish" data-filter-value="matte" aria-pressed="false">Матовая</button>
+                  <button type="button" data-filter-axis="finish" data-filter-value="satin" aria-pressed="false">Сатин</button>
+                </div>
+              </fieldset>
             </div>
             <div class="palette-grid" id="user-colors-grid"></div>
             <div class="empty-state" id="user-colors-empty" hidden>
@@ -227,55 +245,6 @@
         aria-label="Закрыть фото"
       >×</button>
       <img id="source-photo-full" alt="Выбранное фото для генерации полностью">
-    </dialog>
-
-    <dialog class="add-color-dialog" id="add-color-dialog" aria-labelledby="add-color-title">
-      <form id="add-color-form" method="dialog">
-        <header class="dialog-header">
-          <div>
-            <p class="eyebrow">USER COLOR</p>
-            <h2 id="add-color-title">Добавить свой цвет</h2>
-          </div>
-          <button class="icon-button" id="close-add-color" type="button" aria-label="Закрыть">×</button>
-        </header>
-
-        <div class="disclosure">
-          <p>Образец будет сохранён в вашем аккаунте и после проверки станет доступен другим пользователям.</p>
-          <p>Фото автомобиля и результат мы не сохраняем.</p>
-          <p>Изображение обработают сервис модерации и AI-провайдер.</p>
-        </div>
-
-        <div class="field">
-          <label for="color-image">Фото образца</label>
-          <p>JPEG, PNG, WebP или HEIC/HEIF · до 8 МБ</p>
-          <input
-            id="color-image"
-            name="image"
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
-            required
-          >
-          <div class="upload-preview" id="upload-preview" hidden>
-            <img id="upload-preview-image" alt="Предпросмотр образца цвета">
-            <button id="replace-color-image" type="button">Заменить фото</button>
-          </div>
-        </div>
-
-        <div class="field">
-          <div class="field-label-row">
-            <label for="color-name">Название цвета (необязательно)</label>
-            <span id="color-name-counter">0/40</span>
-          </div>
-          <input id="color-name" name="name" type="text" maxlength="40" placeholder="Оставьте пустым — прочитаем с фото">
-        </div>
-
-        <progress id="upload-progress" max="100" value="0" hidden></progress>
-        <p class="upload-message" id="upload-message" role="status" aria-live="polite"></p>
-        <div class="dialog-alert" id="dialog-alert" role="alert" hidden></div>
-        <button class="upload-submit" id="upload-submit" type="submit">
-          Отправить на проверку
-        </button>
-      </form>
     </dialog>
 
     <dialog

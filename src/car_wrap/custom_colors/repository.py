@@ -43,6 +43,10 @@ class VersionInput:
     byte_size: int
     width: int
     height: int
+    color_structure: str = "unspecified"
+    finish: str = "unspecified"
+    analysis_revision: str | None = None
+    color_profile: dict[str, object] | None = None
 
 
 _TRANSITIONS: dict[ColorStatus, frozenset[ColorStatus]] = {
@@ -110,10 +114,45 @@ class CustomColorRepository:
                 byte_size=version.byte_size,
                 width=version.width,
                 height=version.height,
+                color_structure=version.color_structure,
+                finish=version.finish,
+                analysis_revision=version.analysis_revision,
+                color_profile=version.color_profile,
             )
         )
         await session.flush()
         return color
+
+    async def apply_analysis(
+        self,
+        session: AsyncSession,
+        *,
+        color_id: UUID,
+        analysis_revision: str,
+        color_profile: dict[str, object],
+    ) -> None:
+        """Attach validated analysis metadata before a version can auto-approve."""
+
+        color = await session.scalar(
+            select(CustomColor).where(CustomColor.id == color_id).with_for_update()
+        )
+        if color is None:
+            raise LookupError("custom color not found")
+        version = await session.scalar(
+            select(CustomColorVersion)
+            .where(
+                CustomColorVersion.custom_color_id == color.id,
+                CustomColorVersion.version == color.current_version,
+            )
+            .with_for_update()
+        )
+        if version is None:
+            raise LookupError("custom color version not found")
+        if version.analysis_revision is not None or version.color_profile is not None:
+            raise ValueError("custom color analysis is immutable")
+        version.analysis_revision = analysis_revision
+        version.color_profile = color_profile
+        await session.flush()
 
     async def transition(
         self,
@@ -138,6 +177,24 @@ class CustomColorRepository:
             raise InvalidTransitionError("only hidden colors can be restored")
         if target not in _TRANSITIONS[current]:
             raise InvalidTransitionError(f"{current} cannot transition to {target}")
+        if target is ColorStatus.APPROVED:
+            version = await session.scalar(
+                select(CustomColorVersion)
+                .where(
+                    CustomColorVersion.custom_color_id == color.id,
+                    CustomColorVersion.version == color.current_version,
+                )
+                .with_for_update()
+            )
+            if version is None:
+                raise InvalidTransitionError("custom color version is missing")
+            if (
+                version.color_structure in {"solid", "multicolor"}
+                and version.color_profile is None
+            ):
+                raise InvalidTransitionError(
+                    "profiled custom color requires successful analysis"
+                )
         now = datetime.now(UTC)
         color.status = target.value
         color.reason_code = reason_code
