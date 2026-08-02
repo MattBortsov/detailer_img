@@ -76,9 +76,7 @@ def test_profiled_custom_prompt_uses_only_server_owned_material_metadata() -> No
         91,
         (
             ColorCluster("#51466E", (32.0, 11.0, -20.0), 0.55, (0, 0, 400, 400)),
-            ColorCluster(
-                "#B04CDD", (50.0, 54.0, -43.0), 0.45, (500, 0, 400, 400)
-            ),
+            ColorCluster("#B04CDD", (50.0, 54.0, -43.0), 0.45, (500, 0, 400, 400)),
         ),
     )
     intent = CustomColorIntent(

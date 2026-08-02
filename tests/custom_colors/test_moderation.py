@@ -24,12 +24,8 @@ def response_payload(**overrides: object) -> dict[str, object]:
         "wrap_reference": True,
         "safety_confidence": 98,
         "domain_confidence": 96,
-        "material_regions": [
-            {"x": 100, "y": 120, "width": 700, "height": 650}
-        ],
-        "excluded_regions": [
-            {"x": 300, "y": 300, "width": 120, "height": 80}
-        ],
+        "material_regions": [{"x": 100, "y": 120, "width": 700, "height": 650}],
+        "excluded_regions": [{"x": 300, "y": 300, "width": 120, "height": 80}],
         "localization_confidence": 93,
         "reason_code": "approved",
     }

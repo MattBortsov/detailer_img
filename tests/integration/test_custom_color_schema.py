@@ -158,6 +158,7 @@ async def test_profiled_reference_cannot_be_approved_without_analysis(
                 admin_action="approve",
             )
 
+
 @pytest.mark.asyncio
 async def test_quota_is_atomic_per_owner(database_engine: AsyncEngine) -> None:
     sessions = async_sessionmaker(database_engine, expire_on_commit=False)

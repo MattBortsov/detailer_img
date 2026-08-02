@@ -31,9 +31,7 @@ def png(image: Image.Image) -> bytes:
 
 def moderation(
     *,
-    material: tuple[NormalizedRegion, ...] = (
-        NormalizedRegion(100, 100, 800, 800),
-    ),
+    material: tuple[NormalizedRegion, ...] = (NormalizedRegion(100, 100, 800, 800),),
     excluded: tuple[NormalizedRegion, ...] = (),
 ) -> ModerationResult:
     return ModerationResult(
