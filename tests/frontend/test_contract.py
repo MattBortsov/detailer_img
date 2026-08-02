@@ -134,7 +134,8 @@ def test_native_card_surfaces_flip_without_coupling_selection() -> None:
     assert "Палитра" not in html
     assert '"Палитра"' not in js
     assert 'id="add-color-dialog"' not in html
-    assert "start=custom_color" in js
+    assert "start=custom_color" not in js
+    assert 'fetchJson("/api/v1/custom-colors/prompt"' in js
     assert "new FormData" not in js
     assert html.count(warning) == 1
     assert warning not in html.split('<template id="choice-template">', 1)[1]
@@ -315,7 +316,14 @@ def test_user_colors_hands_upload_to_bot_and_exposes_two_filter_axes() -> None:
     assert mine_add_buttons[0].get("type") == "button"
     assert "Добавить" in parser.text
     assert "elements.mineEmpty.hidden = state.ownerColors.length !== 0" in js
-    assert 'elements.mineAdd.addEventListener("click", openAddDialog)' in js
+    assert 'elements.mineAdd.addEventListener("click", requestCustomColorPrompt)' in js
+    prompt_flow = js.split("async function requestCustomColorPrompt()", 1)[1].split(
+        'elements.openAdd.addEventListener("click", requestCustomColorPrompt)', 1
+    )[0]
+    assert prompt_flow.index("await fetchJson") < prompt_flow.index("openTelegramUrl")
+    assert "customColorPromptInFlight" in prompt_flow
+    assert "elements.openAdd.disabled = true" in prompt_flow
+    assert "elements.mineAdd.disabled = true" in prompt_flow
     empty_button = css.split(".management-empty .secondary-button", 1)[1].split("}", 1)[
         0
     ]

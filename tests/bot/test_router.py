@@ -263,6 +263,26 @@ async def test_custom_color_flow_collects_two_independent_axes_before_file() -> 
 
 
 @pytest.mark.asyncio
+async def test_structure_callback_initializes_flow_from_api_sent_prompt() -> None:
+    bot = FakeBot()
+    uploads: dict[int, CustomColorUploadState] = {}
+
+    await handle_custom_color_structure(
+        SimpleNamespace(
+            id="structure-from-api",
+            data="custom_color:structure:solid",
+            from_user=SimpleNamespace(id=1001),
+            message=message(),
+        ),
+        bot=bot,
+        pending_uploads=uploads,
+    )
+
+    assert uploads[1001] == CustomColorUploadState("solid", None)
+    assert bot.sent[-1]["text"] == CUSTOM_COLOR_FINISH_COPY
+
+
+@pytest.mark.asyncio
 async def test_menu_callback_reopens_palette_or_invites_new_photo() -> None:
     bot = FakeBot()
     callback = SimpleNamespace(

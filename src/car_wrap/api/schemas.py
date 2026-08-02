@@ -40,6 +40,11 @@ class PhotoReplacementOut(StrictApiModel):
     bot_chat_url: str
 
 
+class CustomColorPromptOut(StrictApiModel):
+    status: Literal["prompt_sent"]
+    bot_chat_url: str
+
+
 class SelectionValidationIn(StrictApiModel):
     color_id: str
     client_submission_uuid: UUID

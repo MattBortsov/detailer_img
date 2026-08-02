@@ -73,6 +73,7 @@ let sessionExchangeAttempted = false;
 let catalogLoaded = false;
 let pendingColorId = null;
 let replacementInFlight = false;
+let customColorPromptInFlight = false;
 const telegram = window.Telegram?.WebApp;
 
 function exactKeys(value, expected) {
@@ -894,17 +895,45 @@ async function submitSelectedChoice() {
   render();
 }
 
-function openAddDialog() {
-  const botUrl = trustedBotUrl(state.botChatUrl);
-  if (!botUrl) {
+async function requestCustomColorPrompt() {
+  if (customColorPromptInFlight) {
     return;
   }
-  openTelegramUrl(`${botUrl}?start=custom_color`);
-  telegram?.close();
+  customColorPromptInFlight = true;
+  elements.openAdd.disabled = true;
+  elements.mineAdd.disabled = true;
+  try {
+    const response = await fetchJson("/api/v1/custom-colors/prompt", {
+      method: "POST",
+    });
+    const payload = await response.json();
+    if (
+      !response.ok ||
+      !exactKeys(payload, ["status", "bot_chat_url"]) ||
+      payload.status !== "prompt_sent"
+    ) {
+      throw new Error("Custom color prompt failed");
+    }
+    const botUrl = trustedBotUrl(payload.bot_chat_url);
+    if (!botUrl) {
+      throw new Error("Invalid bot URL");
+    }
+    openTelegramUrl(botUrl);
+  } catch {
+    if (state.view !== "auth_failed") {
+      elements.alert.textContent =
+        "Не удалось начать добавление цвета. Попробуйте ещё раз.";
+      elements.alert.hidden = false;
+    }
+  } finally {
+    customColorPromptInFlight = false;
+    elements.openAdd.disabled = false;
+    elements.mineAdd.disabled = false;
+  }
 }
 
-elements.openAdd.addEventListener("click", openAddDialog);
-elements.mineAdd.addEventListener("click", openAddDialog);
+elements.openAdd.addEventListener("click", requestCustomColorPrompt);
+elements.mineAdd.addEventListener("click", requestCustomColorPrompt);
 elements.catalogFilters.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-filter-axis]");
   if (!(button instanceof HTMLButtonElement)) {

@@ -15,6 +15,7 @@ from car_wrap.api.dependencies import (
     CurrentMiniAppSession,
     require_mini_app_session,
 )
+from car_wrap.bot.router import CUSTOM_COLOR_STRUCTURE_COPY
 from car_wrap.config import AppSettings
 from car_wrap.custom_colors.repository import QuotaExceededError
 
@@ -76,12 +77,34 @@ class QuotaService(Service):
         raise QuotaExceededError("private quota detail")
 
 
-def app_with(service: Service, *, authenticated: bool = True) -> Any:
+class FakeTelegramBot:
+    def __init__(self, *, failure: Exception | None = None) -> None:
+        self.failure = failure
+        self.sent: list[dict[str, Any]] = []
+
+    async def send_message(
+        self,
+        chat_id: int,
+        text: str,
+        **kwargs: Any,
+    ) -> None:
+        if self.failure is not None:
+            raise self.failure
+        self.sent.append({"chat_id": chat_id, "text": text, **kwargs})
+
+
+def app_with(
+    service: Service,
+    *,
+    authenticated: bool = True,
+    telegram_bot: FakeTelegramBot | None = None,
+) -> Any:
     app = create_app(
         settings=settings(),
         session_factory=Sessions(),
         clock=lambda: NOW,
         custom_color_service=service,
+        telegram_bot=telegram_bot,
     )
     if authenticated:
         app.dependency_overrides[require_mini_app_session] = lambda: (
@@ -91,6 +114,83 @@ def app_with(service: Service, *, authenticated: bool = True) -> Any:
             )
         )
     return app
+
+
+@pytest.mark.asyncio
+async def test_prompt_is_sent_to_authenticated_owner_before_chat_opens() -> None:
+    telegram = FakeTelegramBot()
+    async with AsyncClient(
+        transport=ASGITransport(
+            app=app_with(Service(), telegram_bot=telegram),
+        ),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.post("/api/v1/custom-colors/prompt")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "status": "prompt_sent",
+        "bot_chat_url": "https://t.me/CarWrapBot",
+    }
+    assert telegram.sent[0]["chat_id"] == 1001
+    assert telegram.sent[0]["text"] == CUSTOM_COLOR_STRUCTURE_COPY
+    buttons = telegram.sent[0]["reply_markup"].inline_keyboard[0]
+    assert [button.text for button in buttons] == ["Однотонная", "Многоцветная"]
+    assert [button.callback_data for button in buttons] == [
+        "custom_color:structure:solid",
+        "custom_color:structure:multicolor",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_prompt_reports_telegram_delivery_failure_without_chat_url() -> None:
+    telegram = FakeTelegramBot(failure=RuntimeError("private telegram detail"))
+    async with AsyncClient(
+        transport=ASGITransport(
+            app=app_with(Service(), telegram_bot=telegram),
+        ),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.post("/api/v1/custom-colors/prompt")
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Could not open custom color flow"}
+    assert "private telegram detail" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_prompt_requires_session_and_rejects_identity_query() -> None:
+    unauthenticated_bot = FakeTelegramBot()
+    authenticated_bot = FakeTelegramBot()
+    async with (
+        AsyncClient(
+            transport=ASGITransport(
+                app=app_with(
+                    Service(),
+                    authenticated=False,
+                    telegram_bot=unauthenticated_bot,
+                ),
+            ),
+            base_url="https://testserver",
+        ) as unauthenticated,
+        AsyncClient(
+            transport=ASGITransport(
+                app=app_with(Service(), telegram_bot=authenticated_bot),
+            ),
+            base_url="https://testserver",
+        ) as authenticated,
+    ):
+        missing_session = await unauthenticated.post("/api/v1/custom-colors/prompt")
+        injected_identity = await authenticated.post(
+            "/api/v1/custom-colors/prompt",
+            params={"telegram_user_id": "2002"},
+        )
+
+    assert missing_session.status_code == 401
+    assert injected_identity.status_code == 400
+    assert not unauthenticated_bot.sent
+    assert not authenticated_bot.sent
 
 
 @pytest.mark.asyncio

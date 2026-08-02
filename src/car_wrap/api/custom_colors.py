@@ -20,7 +20,11 @@ from car_wrap.api.dependencies import (
     database_session,
     require_mini_app_session,
 )
-from car_wrap.api.schemas import CustomColorMutationIn
+from car_wrap.api.schemas import CustomColorMutationIn, CustomColorPromptOut
+from car_wrap.bot.router import (
+    CUSTOM_COLOR_STRUCTURE_COPY,
+    custom_color_structure_keyboard,
+)
 from car_wrap.custom_colors.media import MediaValidationError
 from car_wrap.custom_colors.repository import (
     ColorStatus,
@@ -124,6 +128,36 @@ async def create_custom_color(
             "status": color.status,
             "version": color.current_version,
         },
+    )
+
+
+@router.post("/prompt", response_model=CustomColorPromptOut)
+async def request_custom_color_prompt(
+    request: Request,
+    response: Response,
+    current: CurrentSession,
+) -> CustomColorPromptOut:
+    if request.query_params:
+        raise HTTPException(status_code=400, detail="Invalid request")
+    bot = getattr(request.app.state, "telegram_bot", None)
+    if bot is None:
+        raise HTTPException(status_code=503, detail="Service unavailable")
+    try:
+        await bot.send_message(
+            current.telegram_user_id,
+            CUSTOM_COLOR_STRUCTURE_COPY,
+            reply_markup=custom_color_structure_keyboard(),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail="Could not open custom color flow",
+        ) from None
+    response.headers["Cache-Control"] = "no-store"
+    settings = request.app.state.settings
+    return CustomColorPromptOut(
+        status="prompt_sent",
+        bot_chat_url=f"https://t.me/{settings.bot_username}",
     )
 
 
