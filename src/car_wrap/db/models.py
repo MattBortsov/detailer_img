@@ -247,7 +247,7 @@ class CustomColorVersion(Base):
             name="color_structure_supported",
         ),
         CheckConstraint(
-            "finish IN ('unspecified', 'matte', 'satin')",
+            "finish IN ('unspecified', 'matte', 'satin', 'gloss')",
             name="finish_supported",
         ),
     )

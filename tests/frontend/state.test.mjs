@@ -94,13 +94,13 @@ test("community filters are independent and reset pagination", () => {
     nextCursor: "next",
   });
   const solid = setCatalogFilter(loaded, "structure", "solid");
-  const satin = setCatalogFilter(solid, "finish", "satin");
+  const gloss = setCatalogFilter(solid, "finish", "gloss");
 
-  assert.equal(satin.catalogStructure, "solid");
-  assert.equal(satin.catalogFinish, "satin");
-  assert.deepEqual(satin.customColors, []);
-  assert.equal(satin.catalogCursor, null);
-  assert.equal(setCatalogFilter(satin, "finish", "metallic"), satin);
+  assert.equal(gloss.catalogStructure, "solid");
+  assert.equal(gloss.catalogFinish, "gloss");
+  assert.deepEqual(gloss.customColors, []);
+  assert.equal(gloss.catalogCursor, null);
+  assert.equal(setCatalogFilter(gloss, "finish", "metallic"), gloss);
 });
 
 test("named and Surprise selections enable submission without global CTA copy", () => {

@@ -103,13 +103,13 @@ The focused fixtures must demonstrate all of the following:
 - a multicolor or chameleon sample retains two to five supported palette
   colors instead of collapsing to one average;
 - uncertain or mismatched samples fail closed and cannot be auto-approved;
-- matte/satin and solid/multicolor values survive profile validation as
+- matte/satin/gloss and solid/multicolor values survive profile validation as
   server-owned metadata.
 
 Offline extraction success does not prove generated-output quality. Add
 authorized vehicle cases for each custom-reference family to the existing
 locked corpus, score `color_intent` for hue-family and transition fidelity, and
-score `lighting_material` for matte/satin plausibility. Do not claim exact
+score `lighting_material` for matte/satin/gloss plausibility. Do not claim exact
 physical, SKU, camera-independent, or display-independent matching.
 
 Each paid corpus case still receives at most one provider attempt per explicit

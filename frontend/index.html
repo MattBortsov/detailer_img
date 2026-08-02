@@ -100,14 +100,10 @@
             data-panel="users"
             hidden
           >
-            <div class="section-heading section-heading-action">
-              <div>
-                <p class="eyebrow">СООБЩЕСТВО</p>
-                <h2>User Colors</h2>
-                <p>Цвета, добавленные пользователями и прошедшие проверку.</p>
-              </div>
+            <div class="user-colors-intro">
+              <p>Цвета, добавленные пользователями и прошедшие проверку.</p>
               <button class="secondary-button" id="open-add-color" type="button">
-                Добавить свой цвет в боте
+                Добавить свой цвет
               </button>
             </div>
             <div class="catalog-filters" id="catalog-filters" aria-label="Фильтры пользовательских цветов">
@@ -120,11 +116,12 @@
                 </div>
               </fieldset>
               <fieldset>
-                <legend>Финиш</legend>
+                <legend>Поверхность плёнки</legend>
                 <div class="filter-options">
                   <button type="button" data-filter-axis="finish" data-filter-value="all" aria-pressed="true">Все</button>
                   <button type="button" data-filter-axis="finish" data-filter-value="matte" aria-pressed="false">Матовая</button>
                   <button type="button" data-filter-axis="finish" data-filter-value="satin" aria-pressed="false">Сатин</button>
+                  <button type="button" data-filter-axis="finish" data-filter-value="gloss" aria-pressed="false">Глянцевая</button>
                 </div>
               </fieldset>
             </div>
@@ -140,6 +137,12 @@
             <details class="management-panel" id="mine-panel">
               <summary>Мои цвета</summary>
               <div class="management-list" id="mine-list"></div>
+              <div class="management-empty" id="mine-empty" hidden>
+                <p>Пока что пусто</p>
+                <button class="secondary-button" id="mine-add-color" type="button">
+                  Добавить
+                </button>
+              </div>
             </details>
 
             <details class="management-panel admin-panel" id="admin-panel" hidden>
@@ -177,6 +180,7 @@
 
           <p class="selection-status" id="selection-status" role="status" aria-live="polite"></p>
           <div class="inline-alert" id="inline-alert" role="alert" hidden></div>
+          <p class="film-warning">Цвет на экране может отличаться от реальной плёнки.</p>
 
           <div class="action-bar">
             <button class="chat-button" type="button" data-open-chat>
@@ -184,7 +188,6 @@
             </button>
           </div>
         </form>
-        <p class="film-warning">Цвет на экране может отличаться от реальной плёнки.</p>
       </section>
 
       <section class="center-state" id="no-source-state" hidden>

@@ -207,12 +207,16 @@ async def test_custom_color_flow_collects_two_independent_axes_before_file() -> 
     )
     assert bot.sent[-1]["text"] == CUSTOM_COLOR_FINISH_COPY
     finish_buttons = bot.sent[-1]["reply_markup"].inline_keyboard[0]
-    assert [button.text for button in finish_buttons] == ["Матовая", "Сатин"]
+    assert [button.text for button in finish_buttons] == [
+        "Матовая",
+        "Сатин",
+        "Глянцевая",
+    ]
 
     await handle_custom_color_finish(
         SimpleNamespace(
             id="finish",
-            data="custom_color:finish:satin",
+            data="custom_color:finish:gloss",
             from_user=SimpleNamespace(id=1001),
             message=incoming,
         ),
@@ -220,7 +224,7 @@ async def test_custom_color_flow_collects_two_independent_axes_before_file() -> 
         pending_uploads=uploads,
     )
     assert bot.sent[-1]["text"] == CUSTOM_COLOR_REQUEST_COPY
-    assert uploads[1001] == CustomColorUploadState("multicolor", "satin")
+    assert uploads[1001] == CustomColorUploadState("multicolor", "gloss")
 
     class Service:
         def __init__(self) -> None:
@@ -253,7 +257,7 @@ async def test_custom_color_flow_collects_two_independent_axes_before_file() -> 
     )
 
     assert service.calls[0]["color_structure"] == "multicolor"
-    assert service.calls[0]["finish"] == "satin"
+    assert service.calls[0]["finish"] == "gloss"
     assert 1001 not in uploads
     assert bot.edited[-1]["text"].startswith("Образец получен")
 

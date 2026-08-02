@@ -51,7 +51,7 @@ CUSTOM_COLOR_STRUCTURE_PREFIX = "custom_color:structure:"
 CUSTOM_COLOR_FINISH_PREFIX = "custom_color:finish:"
 CUSTOM_COLOR_GENERATE_PREFIX = "ccg:"
 CUSTOM_COLOR_STRUCTURE_COPY = "Какая структура цвета у плёнки?"
-CUSTOM_COLOR_FINISH_COPY = "Какой финиш у плёнки?"
+CUSTOM_COLOR_FINISH_COPY = "Какая поверхность у плёнки?"
 CUSTOM_COLOR_REQUEST_COPY = (
     "Пришлите фото образца плёнки следующим сообщением именно как файл "
     "(скрепка → Файл), чтобы Telegram не сжал качество."
@@ -196,6 +196,10 @@ def custom_color_finish_keyboard() -> InlineKeyboardMarkup:
                     text="Сатин",
                     callback_data=f"{CUSTOM_COLOR_FINISH_PREFIX}satin",
                 ),
+                InlineKeyboardButton(
+                    text="Глянцевая",
+                    callback_data=f"{CUSTOM_COLOR_FINISH_PREFIX}gloss",
+                ),
             ]
         ]
     )
@@ -286,7 +290,7 @@ async def handle_custom_color_finish(
         return
     value = (callback.data or "")[len(CUSTOM_COLOR_FINISH_PREFIX) :]
     current = pending_uploads.get(callback.from_user.id)
-    if value not in {"matte", "satin"} or current is None:
+    if value not in {"matte", "satin", "gloss"} or current is None:
         return
     if current.color_structure not in {"solid", "multicolor"}:
         await bot.send_message(

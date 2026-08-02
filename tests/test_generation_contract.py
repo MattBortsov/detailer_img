@@ -72,7 +72,7 @@ def test_profiled_custom_prompt_uses_only_server_owned_material_metadata() -> No
     reference = b"cleaned-reference"
     profile = ReferenceProfile(
         ColorStructure.MULTICOLOR,
-        SurfaceFinish.SATIN,
+        SurfaceFinish.GLOSS,
         91,
         (
             ColorCluster("#51466E", (32.0, 11.0, -20.0), 0.55, (0, 0, 400, 400)),
@@ -86,7 +86,7 @@ def test_profiled_custom_prompt_uses_only_server_owned_material_metadata() -> No
         sha256="a" * 64,
         object_key="private-reference.png",
         color_structure="multicolor",
-        finish="satin",
+        finish="gloss",
         color_profile=profile.to_dict(),
         provider_reference_sha256=hashlib.sha256(reference).hexdigest(),
     )
@@ -101,7 +101,7 @@ def test_profiled_custom_prompt_uses_only_server_owned_material_metadata() -> No
     assert len(payload["input_references"]) == 2
     assert "#51466E" in payload["prompt"]
     assert "#B04CDD" in payload["prompt"]
-    assert "satin" in payload["prompt"]
+    assert "gloss" in payload["prompt"]
     assert "stripes" in payload["prompt"]
     assert intent.object_key not in str(payload)
 

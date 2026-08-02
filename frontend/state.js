@@ -1,6 +1,6 @@
 const MODES = new Set(["colors", "users", "surprise"]);
 const CATALOG_STRUCTURES = new Set(["all", "solid", "multicolor"]);
-const CATALOG_FINISHES = new Set(["all", "matte", "satin"]);
+const CATALOG_FINISHES = new Set(["all", "matte", "satin", "gloss"]);
 
 function freezeState(value) {
   return Object.freeze({

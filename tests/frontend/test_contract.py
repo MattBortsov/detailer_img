@@ -138,7 +138,8 @@ def test_native_card_surfaces_flip_without_coupling_selection() -> None:
     assert "new FormData" not in js
     assert html.count(warning) == 1
     assert warning not in html.split('<template id="choice-template">', 1)[1]
-    assert html.index("</form>") < html.index(warning)
+    assert html.index(warning) < html.index('<div class="action-bar">')
+    assert html.index(warning) < html.index("</form>")
 
     reduced_motion = css.split("@media (prefers-reduced-motion: reduce)", 1)[1]
     assert ".card-circle" in reduced_motion
@@ -276,20 +277,61 @@ def test_user_colors_hands_upload_to_bot_and_exposes_two_filter_axes() -> None:
         for tag, attrs in parser.tags
         if tag == "input" and attrs.get("type") == "file"
     ]
+    mine_add_buttons = [
+        attrs
+        for tag, attrs in parser.tags
+        if tag == "button" and attrs.get("id") == "mine-add-color"
+    ]
 
-    assert "Добавить свой цвет в боте" in visible
+    assert "СООБЩЕСТВО" not in visible
+    assert visible.count("User Colors") == 1
+    assert "Цвета, добавленные пользователями и прошедшие проверку." in visible
+    assert "Добавить свой цвет" in visible
     assert file_inputs == []
     assert 'id="catalog-filters"' in html
+    assert 'class="user-colors-intro"' in html
+    assert ".user-colors-intro .secondary-button" in css
+    assert (
+        "width: 100%"
+        in css.split(".user-colors-intro .secondary-button", 1)[1].split("}", 1)[0]
+    )
     assert visible.count("Однотонная") == 1
     assert visible.count("Многоцветная") == 1
     assert visible.count("Матовая") == 1
     assert visible.count("Сатин") == 1
+    assert visible.count("Глянцевая") == 1
+    assert "Поверхность плёнки" in visible
+    assert ">Финиш<" not in html
     assert 'data-filter-axis="structure"' in html
     assert 'data-filter-axis="finish"' in html
     assert "setCatalogFilter" in js
     assert 'query.set("structure", state.catalogStructure)' in js
     assert 'query.set("finish", state.catalogFinish)' in js
     assert '.filter-options button[aria-pressed="true"]' in css
+
+    assert 'id="mine-empty" hidden' in html
+    assert "Пока что пусто" in visible
+    assert len(mine_add_buttons) == 1
+    assert mine_add_buttons[0].get("type") == "button"
+    assert "Добавить" in parser.text
+    assert "elements.mineEmpty.hidden = state.ownerColors.length !== 0" in js
+    assert 'elements.mineAdd.addEventListener("click", openAddDialog)' in js
+    empty_button = css.split(".management-empty .secondary-button", 1)[1].split("}", 1)[
+        0
+    ]
+    assert "width: 100%" in empty_button
+
+
+def test_chat_action_has_no_bottom_gap_beyond_telegram_safe_area() -> None:
+    html, css, _, _ = sources()
+    app_shell = css.split(".app-shell", 1)[1].split("}", 1)[0]
+    action_bar = css.split(".action-bar", 1)[1].split("}", 1)[0]
+
+    assert "var(--safe-bottom)" in app_shell
+    assert "calc(var(--space-3xl) + var(--safe-bottom))" not in app_shell
+    assert "calc(0px - var(--safe-bottom))" in action_bar
+    assert "calc(var(--space-lg) + var(--safe-bottom))" not in action_bar
+    assert html.index("film-warning") < html.index("action-bar")
 
 
 def test_admin_review_requires_explicit_concealed_preview_action() -> None:

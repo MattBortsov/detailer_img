@@ -150,7 +150,7 @@ async def public_catalog(
             raise HTTPException(status_code=400, detail="Invalid request")
         conditions.append(CustomColorVersion.color_structure == structure)
     if finish is not None:
-        if finish not in {"matte", "satin"}:
+        if finish not in {"matte", "satin", "gloss"}:
             raise HTTPException(status_code=400, detail="Invalid request")
         conditions.append(CustomColorVersion.finish == finish)
     raw_cursor = request.query_params.get("cursor")

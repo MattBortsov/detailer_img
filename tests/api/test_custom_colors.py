@@ -129,14 +129,14 @@ async def test_creation_accepts_explicit_structure_and_finish() -> None:
             files={
                 "name": (None, "Dream Grey Charm Purple"),
                 "color_structure": (None, "multicolor"),
-                "finish": (None, "satin"),
+                "finish": (None, "gloss"),
                 "image": ("sample.png", b"\x89PNG\r\n\x1a\nbytes", "image/png"),
             },
         )
 
     assert response.status_code == 202
     assert service.calls[0]["color_structure"] == "multicolor"
-    assert service.calls[0]["finish"] == "satin"
+    assert service.calls[0]["finish"] == "gloss"
 
 
 @pytest.mark.parametrize(

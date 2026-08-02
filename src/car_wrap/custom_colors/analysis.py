@@ -33,6 +33,7 @@ class SurfaceFinish(StrEnum):
     UNSPECIFIED = "unspecified"
     MATTE = "matte"
     SATIN = "satin"
+    GLOSS = "gloss"
 
 
 @dataclass(frozen=True, slots=True)

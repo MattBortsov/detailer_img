@@ -56,6 +56,8 @@ const elements = {
   retry: document.querySelector("#retry-palette"),
   loadMore: document.querySelector("#load-more-colors"),
   mineList: document.querySelector("#mine-list"),
+  mineEmpty: document.querySelector("#mine-empty"),
+  mineAdd: document.querySelector("#mine-add-color"),
   adminPanel: document.querySelector("#admin-panel"),
   adminList: document.querySelector("#admin-list"),
   surprise: document.querySelector("#select-surprise"),
@@ -197,7 +199,8 @@ function publicCard(item, kind) {
   const finishes = {
     matte: "Матовая",
     satin: "Сатин",
-    unspecified: "Финиш не указан",
+    gloss: "Глянцевая",
+    unspecified: "Поверхность не указана",
   };
   return {
     id: item.selection_id,
@@ -353,6 +356,7 @@ function renderManagement() {
   elements.mineList.replaceChildren(
     ...state.ownerColors.map((item) => statusItem(item)),
   );
+  elements.mineEmpty.hidden = state.ownerColors.length !== 0;
   elements.adminPanel.hidden = !state.isAdmin;
   elements.adminList.replaceChildren(
     ...state.adminQueue.map((item) => statusItem(item, true)),
@@ -586,7 +590,7 @@ function validCatalog(payload) {
         ["unspecified", "solid", "multicolor"].includes(
           item.color_structure,
         ) &&
-        ["unspecified", "matte", "satin"].includes(item.finish) &&
+        ["unspecified", "matte", "satin", "gloss"].includes(item.finish) &&
         typeof item.approved_at === "string",
     ) &&
     (payload.next_cursor === null || typeof payload.next_cursor === "string")
@@ -900,6 +904,7 @@ function openAddDialog() {
 }
 
 elements.openAdd.addEventListener("click", openAddDialog);
+elements.mineAdd.addEventListener("click", openAddDialog);
 elements.catalogFilters.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-filter-axis]");
   if (!(button instanceof HTMLButtonElement)) {

@@ -146,7 +146,7 @@ async def test_profiled_reference_cannot_be_approved_without_analysis(
             version=version_input(
                 "aa/bb/" + "8" * 32 + ".png",
                 color_structure="solid",
-                finish="satin",
+                finish="gloss",
             ),
         )
         with pytest.raises(InvalidTransitionError, match="successful analysis"):

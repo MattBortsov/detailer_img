@@ -104,6 +104,7 @@ async def parse_custom_color_upload(request: Request) -> CustomColorUpload:
         if color_structure not in {"solid", "multicolor"} or finish not in {
             "matte",
             "satin",
+            "gloss",
         }:
             raise HTTPException(status_code=422, detail="Invalid upload")
     return CustomColorUpload(
