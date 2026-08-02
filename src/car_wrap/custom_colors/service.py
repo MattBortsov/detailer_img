@@ -64,6 +64,15 @@ class Repository(Protocol):
         color_profile: dict[str, object],
     ) -> None: ...
 
+    async def rename(
+        self,
+        session: AsyncSession,
+        *,
+        color_id: UUID,
+        display_name: str,
+        owner_id: int | None = None,
+    ) -> Any: ...
+
     async def release(
         self,
         session: AsyncSession,
@@ -151,6 +160,7 @@ class CustomColorService:
         ):
             raise ValueError("color structure and finish must be selected together")
         canonical = self._normalize(upload, declared_mime)
+        name_was_missing = display_name == ""
         normalized_name = display_name or "Без названия"
         normalized_name = normalize_display_name(normalized_name)
         stored = self._storage.put(canonical.data)
@@ -207,8 +217,20 @@ class CustomColorService:
                     result.material_regions,
                     result.excluded_regions,
                     result.localization_confidence,
+                    result.suggested_display_name,
                 )
         try:
+            if (
+                name_was_missing
+                and result.disposition is not ModerationDisposition.REJECTED
+                and result.suggested_display_name is not None
+            ):
+                color = await self._repository.rename(
+                    session,
+                    color_id=color.id,
+                    display_name=result.suggested_display_name,
+                    owner_id=owner_id,
+                )
             if profile is not None:
                 await self._repository.apply_analysis(
                     session,

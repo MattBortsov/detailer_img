@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from io import BytesIO
 from types import SimpleNamespace
@@ -20,6 +21,7 @@ from car_wrap.bot.router import (
     CustomColorUploadState,
     create_router,
     handle_custom_color_finish,
+    handle_custom_color_generate,
     handle_custom_color_message,
     handle_custom_color_request,
     handle_custom_color_structure,
@@ -260,6 +262,74 @@ async def test_custom_color_flow_collects_two_independent_axes_before_file() -> 
     assert service.calls[0]["finish"] == "gloss"
     assert 1001 not in uploads
     assert bot.edited[-1]["text"].startswith("Образец получен")
+
+
+@pytest.mark.asyncio
+async def test_custom_color_analysis_progress_remains_alive_during_long_step() -> None:
+    bot = FakeBot(jpeg())
+    sessions = FakeSessions()
+    uploads = {1001: CustomColorUploadState("solid", "matte")}
+
+    class SlowService:
+        async def create(self, session: object, **kwargs: Any) -> SimpleNamespace:
+            del session, kwargs
+            await asyncio.sleep(0.025)
+            return SimpleNamespace(
+                id="9af2285a-7e61-4b7c-906f-a5bedcd5f313",
+                display_name="Liquid Metal",
+                status="approved",
+                current_version=1,
+            )
+
+    document = Document(
+        file_id="slow-sample",
+        file_unique_id="slow-sample-unique",
+        file_name="sample.jpg",
+        mime_type="image/jpeg",
+    )
+    await handle_custom_color_message(
+        message(media=document),
+        bot=bot,
+        settings=settings(),
+        session_factory=sessions,
+        custom_color_service=SlowService(),
+        pending_uploads=uploads,
+        progress_interval_seconds=0.005,
+    )
+
+    analyzing = [
+        edit["text"]
+        for edit in bot.edited
+        if "Анализируем цвет и материал" in edit["text"]
+    ]
+    assert len(analyzing) >= 2
+    assert analyzing[0] != analyzing[-1]
+    assert bot.edited[-1]["text"] == "✅ Образец принят: Liquid Metal"
+
+
+@pytest.mark.asyncio
+async def test_custom_generation_callback_does_not_duplicate_worker_notice() -> None:
+    bot = FakeBot()
+
+    class AcceptanceService:
+        async def accept(self, session: object, **kwargs: Any) -> None:
+            del session, kwargs
+
+    callback = SimpleNamespace(
+        id="custom-generate",
+        data="ccg:custom:9af2285a-7e61-4b7c-906f-a5bedcd5f313:1",
+        from_user=SimpleNamespace(id=1001),
+        message=message(),
+    )
+    await handle_custom_color_generate(
+        callback,
+        bot=bot,
+        job_acceptance_service=AcceptanceService(),
+        session_factory=FakeSessions(),
+    )
+
+    assert bot.answered_callbacks == ["custom-generate"]
+    assert bot.sent == []
 
 
 @pytest.mark.asyncio

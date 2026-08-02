@@ -82,6 +82,35 @@ def test_solid_ignores_background_text_highlight_and_shadow() -> None:
     assert median_rgb[2] < 80
 
 
+def test_solid_liquid_metal_bands_are_lighting_not_separate_colors() -> None:
+    image = Image.new("RGB", (420, 300), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((42, 30, 378, 78), fill=(255, 190, 180))
+    draw.rectangle((42, 78, 378, 126), fill=(245, 115, 95))
+    draw.rectangle((42, 126, 378, 174), fill=(205, 42, 31))
+    draw.rectangle((42, 174, 378, 222), fill=(130, 15, 15))
+    draw.rectangle((42, 222, 378, 270), fill=(65, 3, 3))
+    draw.text((205, 140), "LIQUID METAL TPU-112B", fill="white")
+
+    profile = analyze_reference(
+        png(image),
+        ColorStructure.SOLID,
+        SurfaceFinish.MATTE,
+        moderation(
+            material=(NormalizedRegion(100, 100, 800, 800),),
+            excluded=(NormalizedRegion(450, 430, 430, 150),),
+        ),
+    )
+
+    assert profile.structure is ColorStructure.SOLID
+    assert profile.base_rgb_hex is not None
+    red, green, blue = (
+        int(profile.base_rgb_hex[index : index + 2], 16) for index in (1, 3, 5)
+    )
+    assert red > green * 2
+    assert red > blue * 2
+
+
 def test_multicolor_preserves_multiple_supported_hues() -> None:
     image = Image.new("RGB", (360, 240), (80, 89, 108))
     draw = ImageDraw.Draw(image)

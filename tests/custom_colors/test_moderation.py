@@ -27,6 +27,8 @@ def response_payload(**overrides: object) -> dict[str, object]:
         "material_regions": [{"x": 100, "y": 120, "width": 700, "height": 650}],
         "excluded_regions": [{"x": 300, "y": 300, "width": 120, "height": 80}],
         "localization_confidence": 93,
+        "label_name": None,
+        "product_code": None,
         "reason_code": "approved",
     }
     decision.update(overrides)
@@ -63,6 +65,28 @@ async def test_moderation_decision_matrix(
         assert result.material_regions[0].x == 100
         assert result.excluded_regions[0].width == 120
         assert result.localization_confidence == 93
+
+
+@pytest.mark.asyncio
+async def test_visible_product_label_becomes_bounded_suggested_name() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=response_payload(
+                label_name="TPU Dream Grey Charm Purple",
+                product_code="TPU-Z060",
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await moderate_reference(
+            b"canonical",
+            client=client,
+            api_key=None,
+            model="google/gemini-2.5-flash",
+        )
+
+    assert result.suggested_display_name == ("TPU Dream Grey Charm Purple TPU-Z060")
 
 
 @pytest.mark.asyncio

@@ -40,6 +40,7 @@ class Storage:
 class Color:
     id: UUID
     status: str = "pending"
+    display_name: str = "Без названия"
 
 
 class Repository:
@@ -48,6 +49,7 @@ class Repository:
         self.applied: list[tuple[UUID, str, str]] = []
         self.created: list[VersionInput] = []
         self.profiles: list[dict[str, object]] = []
+        self.renamed: list[str] = []
         self.color = Color(uuid4())
 
     async def create(self, session: object, **kwargs: object) -> Color:
@@ -83,6 +85,21 @@ class Repository:
         if marker not in self.applied:
             self.applied.append(marker)
         self.color.status = result.disposition.value
+        return self.color
+
+    async def rename(
+        self,
+        session: object,
+        *,
+        color_id: UUID,
+        display_name: str,
+        owner_id: int | None = None,
+    ) -> Color:
+        del session
+        assert color_id == self.color.id
+        assert owner_id == 42
+        self.renamed.append(display_name)
+        self.color.display_name = display_name
         return self.color
 
 
@@ -138,6 +155,55 @@ async def test_success_persists_canonical_bytes_and_applies_moderation() -> None
     assert session.commits == 2
     assert not storage.deleted
     assert len(repository.applied) == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_bot_name_uses_detected_label_without_overriding_user_name() -> (
+    None
+):
+    repository = Repository()
+
+    async def moderate(data: bytes) -> ModerationResult:
+        del data
+        return ModerationResult(
+            ModerationDisposition.APPROVED,
+            "approved",
+            98,
+            97,
+            suggested_display_name="TPU Dream Grey Charm Purple TPU-Z060",
+        )
+
+    service = CustomColorService(
+        storage=Storage(),
+        repository=repository,
+        normalize=lambda data, mime: CanonicalImage(
+            b"png", "image/png", 80, 60, "d" * 64
+        ),
+        moderate=moderate,
+        moderation_model="vision-model",
+    )
+
+    detected = await service.create(
+        Session(),
+        owner_id=42,
+        display_name="",
+        upload=b"source",
+        declared_mime="image/png",
+        idempotency_key="detected-name",
+    )
+    assert detected.display_name == "TPU Dream Grey Charm Purple TPU-Z060"
+    assert repository.renamed == ["TPU Dream Grey Charm Purple TPU-Z060"]
+
+    repository.renamed.clear()
+    await service.create(
+        Session(),
+        owner_id=42,
+        display_name="Owner name",
+        upload=b"source",
+        declared_mime="image/png",
+        idempotency_key="owner-name",
+    )
+    assert repository.renamed == []
 
 
 @pytest.mark.asyncio

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from io import BytesIO
@@ -234,6 +234,27 @@ def _lab_distance(
     )
 
 
+def _solid_material_distance(
+    first: tuple[float, float, float],
+    second: tuple[float, float, float],
+) -> float:
+    first_chroma = math.hypot(first[1], first[2])
+    second_chroma = math.hypot(second[1], second[2])
+    if max(first_chroma, second_chroma) < 12:
+        return abs(first[0] - second[0]) * 0.25 + abs(first_chroma - second_chroma)
+    if min(first_chroma, second_chroma) < 8:
+        return 100.0
+    first_hue = math.degrees(math.atan2(first[2], first[1]))
+    second_hue = math.degrees(math.atan2(second[2], second[1]))
+    hue_delta = abs(first_hue - second_hue)
+    hue_delta = min(hue_delta, 360 - hue_delta)
+    return (
+        hue_delta * 1.2
+        + abs(first_chroma - second_chroma) * 0.12
+        + abs(first[0] - second[0]) * 0.04
+    )
+
+
 def _lab_values(encoded: Sequence[float]) -> tuple[float, float, float]:
     return encoded[0] * 100 / 255, encoded[1] - 128, encoded[2] - 128
 
@@ -350,15 +371,23 @@ def _candidate_tiles(
     return rgb, tiles
 
 
-def _cluster_tiles(tiles: list[_Tile], *, threshold: float) -> list[_WorkingCluster]:
+def _cluster_tiles(
+    tiles: list[_Tile],
+    *,
+    threshold: float,
+    distance: Callable[
+        [tuple[float, float, float], tuple[float, float, float]],
+        float,
+    ] = _lab_distance,
+) -> list[_WorkingCluster]:
     clusters: list[_WorkingCluster] = []
     for tile in sorted(tiles, key=lambda item: item.quality, reverse=True):
         closest = min(
             clusters,
-            key=lambda cluster: _lab_distance(tile.lab, cluster.center),
+            key=lambda cluster: distance(tile.lab, cluster.center),
             default=None,
         )
-        if closest is None or _lab_distance(tile.lab, closest.center) > threshold:
+        if closest is None or distance(tile.lab, closest.center) > threshold:
             clusters.append(_WorkingCluster([tile]))
         else:
             closest.tiles.append(tile)
@@ -407,6 +436,11 @@ def analyze_reference(
     clusters = _cluster_tiles(
         tiles,
         threshold=22 if normalized_structure is ColorStructure.SOLID else 14,
+        distance=(
+            _solid_material_distance
+            if normalized_structure is ColorStructure.SOLID
+            else _lab_distance
+        ),
     )
     clusters.sort(key=lambda item: len(item.tiles), reverse=True)
     palette: tuple[ColorCluster, ...]
