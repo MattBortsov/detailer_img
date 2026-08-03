@@ -216,9 +216,7 @@ async def test_admin_edit_reprofiles_saved_reference_without_new_moderation() ->
     service = CustomColorService(
         storage=Storage(),
         repository=repository,
-        normalize=lambda data, mime: CanonicalImage(
-            data, mime, 80, 60, "d" * 64
-        ),
+        normalize=lambda data, mime: CanonicalImage(data, mime, 80, 60, "d" * 64),
         moderate=moderate,
         analyze=analyze,
         moderation_model="vision-model",

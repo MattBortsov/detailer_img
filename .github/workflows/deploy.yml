@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy tested main to Hetzner
+    name: Deploy main to Hetzner
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
