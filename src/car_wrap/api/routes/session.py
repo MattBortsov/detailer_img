@@ -1,4 +1,4 @@
-"""One-time Telegram initData-to-cookie exchange route."""
+"""Telegram initData-to-cookie exchange route."""
 
 from __future__ import annotations
 

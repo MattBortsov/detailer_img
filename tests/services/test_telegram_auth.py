@@ -9,10 +9,15 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
 import pytest
+from pydantic import SecretStr
 
+import car_wrap.services.telegram_auth as telegram_auth
 from car_wrap.config import AppSettings
+from car_wrap.db.models import MiniAppSession
 from car_wrap.services.telegram_auth import (
+    AuthenticatedTelegramUser,
     TelegramAuthenticationError,
+    exchange_init_data,
     validate_init_data,
 )
 
@@ -81,6 +86,67 @@ def test_valid_init_data_returns_only_owner_and_auth_time() -> None:
     assert set(authenticated.__slots__) == {"telegram_user_id", "auth_date"}
     assert "query-canary" not in repr(authenticated)
     assert "first_name" not in repr(authenticated)
+
+
+class ExchangeSession:
+    def __init__(self, row: MiniAppSession | None) -> None:
+        self.row = row
+        self.added: list[MiniAppSession] = []
+        self.flushes = 0
+        self.rollbacks = 0
+
+    async def scalar(self, statement: object) -> MiniAppSession | None:
+        del statement
+        return self.row
+
+    def add(self, row: MiniAppSession) -> None:
+        self.added.append(row)
+        self.row = row
+
+    async def flush(self) -> None:
+        self.flushes += 1
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
+
+
+@pytest.mark.asyncio
+async def test_reuses_valid_init_data_by_rotating_opaque_session_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_init_data = signed_init_data()
+    existing = MiniAppSession(
+        token_sha256="a" * 64,
+        init_data_sha256=hashlib.sha256(raw_init_data.encode()).hexdigest(),
+        telegram_user_id=1001,
+        auth_date=NOW,
+        created_at=NOW,
+        expires_at=NOW + timedelta(minutes=5),
+        revoked_at=None,
+    )
+    session = ExchangeSession(existing)
+    monkeypatch.setattr(
+        telegram_auth,
+        "validate_init_data",
+        lambda *args, **kwargs: AuthenticatedTelegramUser(1001, NOW),
+    )
+
+    issued = await exchange_init_data(
+        session,  # type: ignore[arg-type]
+        raw_init_data,
+        settings=settings(session_ttl_seconds=900),
+        now=NOW,
+    )
+
+    assert session.added == []
+    assert session.flushes == 1
+    assert session.rollbacks == 0
+    assert (
+        existing.token_sha256
+        == hashlib.sha256(issued.token.get_secret_value().encode()).hexdigest()
+    )
+    assert existing.expires_at == NOW + timedelta(minutes=15)
+    assert issued.token != SecretStr("a" * 43)
 
 
 @pytest.mark.parametrize(

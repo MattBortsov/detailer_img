@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qsl
 
 from pydantic import SecretStr
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -186,30 +187,65 @@ async def exchange_init_data(
     settings: AppSettings,
     now: datetime,
 ) -> IssuedMiniAppSession:
-    """Exchange one valid launch proof for one digest-backed opaque token."""
+    """Exchange valid launch proof for a digest-backed opaque token."""
 
     authenticated = validate_init_data(
         raw_init_data,
         settings=settings,
         now=now,
     )
+    init_data_sha256 = hashlib.sha256(raw_init_data.encode("utf-8")).hexdigest()
     raw_token = secrets.token_urlsafe(32)
+    token_sha256 = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
     expires_at = now.astimezone(UTC) + timedelta(seconds=settings.session_ttl_seconds)
-    row = MiniAppSession(
-        token_sha256=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
-        init_data_sha256=hashlib.sha256(raw_init_data.encode("utf-8")).hexdigest(),
-        telegram_user_id=authenticated.telegram_user_id,
-        auth_date=authenticated.auth_date,
-        created_at=now.astimezone(UTC),
-        expires_at=expires_at,
-        revoked_at=None,
+    row = await session.scalar(
+        select(MiniAppSession)
+        .where(MiniAppSession.init_data_sha256 == init_data_sha256)
+        .with_for_update()
     )
-    session.add(row)
+    if row is None:
+        row = MiniAppSession(
+            token_sha256=token_sha256,
+            init_data_sha256=init_data_sha256,
+            telegram_user_id=authenticated.telegram_user_id,
+            auth_date=authenticated.auth_date,
+            created_at=now.astimezone(UTC),
+            expires_at=expires_at,
+            revoked_at=None,
+        )
+        session.add(row)
+    else:
+        # Telegram may reuse valid initData when a menu-button WebView is
+        # reopened. Its signature and freshness were verified above, so rotate
+        # this browser capability instead of rejecting the legitimate launch.
+        row.token_sha256 = token_sha256
+        row.telegram_user_id = authenticated.telegram_user_id
+        row.auth_date = authenticated.auth_date
+        row.expires_at = expires_at
+        row.revoked_at = None
     try:
         await session.flush()
     except IntegrityError:
         await session.rollback()
-        raise TelegramAuthenticationError from None
+        # Two identical launches can race before either transaction creates the
+        # digest row. Reloading it after the unique constraint wins is safe: the
+        # launch proof was authenticated before this point.
+        row = await session.scalar(
+            select(MiniAppSession)
+            .where(MiniAppSession.init_data_sha256 == init_data_sha256)
+            .with_for_update()
+        )
+        if row is None:
+            raise TelegramAuthenticationError from None
+        row.token_sha256 = token_sha256
+        row.telegram_user_id = authenticated.telegram_user_id
+        row.auth_date = authenticated.auth_date
+        row.expires_at = expires_at
+        row.revoked_at = None
+        try:
+            await session.flush()
+        except IntegrityError:
+            raise TelegramAuthenticationError from None
     return IssuedMiniAppSession(
         token=SecretStr(raw_token),
         telegram_user_id=authenticated.telegram_user_id,
