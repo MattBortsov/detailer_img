@@ -32,6 +32,11 @@ class Storage:
             key="aa/bb/" + "c" * 32 + ".png", sha256="d" * 64, byte_size=len(data)
         )
 
+    def read(self, key: str, expected_sha256: str) -> bytes:
+        assert key == "aa/bb/" + "c" * 32 + ".png"
+        assert expected_sha256 == "d" * 64
+        return b"stored-png"
+
     def delete(self, key: str) -> None:
         self.deleted.append(key)
 
@@ -50,6 +55,7 @@ class Repository:
         self.created: list[VersionInput] = []
         self.profiles: list[dict[str, object]] = []
         self.renamed: list[str] = []
+        self.edited: list[dict[str, object]] = []
         self.color = Color(uuid4())
 
     async def create(self, session: object, **kwargs: object) -> Color:
@@ -100,6 +106,24 @@ class Repository:
         assert owner_id == 42
         self.renamed.append(display_name)
         self.color.display_name = display_name
+        return self.color
+
+    async def current_version(self, session: object, *, color_id: UUID) -> object:
+        del session
+        assert color_id == self.color.id
+        return type(
+            "Version",
+            (),
+            {
+                "object_key": "aa/bb/" + "c" * 32 + ".png",
+                "sha256": "d" * 64,
+            },
+        )()
+
+    async def edit_details(self, session: object, **kwargs: object) -> Color:
+        del session
+        self.edited.append(kwargs)
+        self.color.display_name = str(kwargs["display_name"])
         return self.color
 
 
@@ -155,6 +179,95 @@ async def test_success_persists_canonical_bytes_and_applies_moderation() -> None
     assert session.commits == 2
     assert not storage.deleted
     assert len(repository.applied) == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_edit_reprofiles_saved_reference_without_new_moderation() -> None:
+    repository = Repository()
+    session = Session()
+    moderate_called = False
+
+    async def moderate(data: bytes) -> ModerationResult:
+        nonlocal moderate_called
+        del data
+        moderate_called = True
+        raise AssertionError("metadata edit must not call the moderation provider")
+
+    def analyze(
+        data: bytes,
+        structure: ColorStructure,
+        finish: SurfaceFinish,
+        moderation: ModerationResult,
+    ) -> ReferenceProfile:
+        assert data == b"stored-png"
+        assert structure is ColorStructure.MULTICOLOR
+        assert finish is SurfaceFinish.SATIN
+        assert moderation.reason_code == "admin_metadata_edit"
+        return ReferenceProfile(
+            structure,
+            finish,
+            82,
+            (
+                ColorCluster("#123456", (10.0, 11.0, 12.0), 0.5, (1, 1, 20, 20)),
+                ColorCluster("#654321", (13.0, 14.0, 15.0), 0.5, (30, 30, 20, 20)),
+            ),
+        )
+
+    service = CustomColorService(
+        storage=Storage(),
+        repository=repository,
+        normalize=lambda data, mime: CanonicalImage(
+            data, mime, 80, 60, "d" * 64
+        ),
+        moderate=moderate,
+        analyze=analyze,
+        moderation_model="vision-model",
+    )
+
+    color = await service.edit_details(
+        session,
+        color_id=repository.color.id,
+        display_name="Dream Grey Charm Purple",
+        color_structure="multicolor",
+        finish="satin",
+        admin_actor_id=715709681,
+        admin_reason="admin_edited_from_catalog",
+    )
+
+    assert color.display_name == "Dream Grey Charm Purple"
+    assert session.commits == 1
+    assert moderate_called is False
+    assert repository.edited == [
+        {
+            "color_id": repository.color.id,
+            "display_name": "Dream Grey Charm Purple",
+            "color_structure": "multicolor",
+            "finish": "satin",
+            "analysis_revision": "reference-v1",
+            "color_profile": {
+                "revision": "reference-v1",
+                "structure": "multicolor",
+                "finish": "satin",
+                "confidence": 82,
+                "palette": [
+                    {
+                        "rgb_hex": "#123456",
+                        "lab": [10.0, 11.0, 12.0],
+                        "weight": 0.5,
+                        "sample_box": [1, 1, 20, 20],
+                    },
+                    {
+                        "rgb_hex": "#654321",
+                        "lab": [13.0, 14.0, 15.0],
+                        "weight": 0.5,
+                        "sample_box": [30, 30, 20, 20],
+                    },
+                ],
+            },
+            "admin_actor_id": 715709681,
+            "admin_reason": "admin_edited_from_catalog",
+        }
+    ]
 
 
 @pytest.mark.asyncio

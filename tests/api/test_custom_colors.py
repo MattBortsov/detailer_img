@@ -77,6 +77,17 @@ class QuotaService(Service):
         raise QuotaExceededError("private quota detail")
 
 
+class EditService(Service):
+    def __init__(self) -> None:
+        super().__init__()
+        self.edit_call: dict[str, Any] | None = None
+
+    async def edit_details(self, session: object, **kwargs: Any) -> Created:
+        del session
+        self.edit_call = kwargs
+        return Created(kwargs["color_id"], kwargs["display_name"], "approved", 1)
+
+
 class FakeTelegramBot:
     def __init__(self, *, failure: Exception | None = None) -> None:
         self.failure = failure
@@ -98,9 +109,10 @@ def app_with(
     *,
     authenticated: bool = True,
     telegram_bot: FakeTelegramBot | None = None,
+    admins: tuple[int, ...] = (),
 ) -> Any:
     app = create_app(
-        settings=settings(),
+        settings=settings(admins=admins),
         session_factory=Sessions(),
         clock=lambda: NOW,
         custom_color_service=service,
@@ -320,4 +332,52 @@ async def test_non_admin_cannot_open_review_queue() -> None:
         base_url="https://testserver",
     ) as client:
         response = await client.get("/api/v1/custom-colors/admin/review")
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_can_edit_catalog_name_and_category_together() -> None:
+    service = EditService()
+    color_id = uuid4()
+    async with AsyncClient(
+        transport=ASGITransport(app=app_with(service, admins=(1001,))),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.post(
+            f"/api/v1/custom-colors/admin/{color_id}/edit",
+            json={
+                "name": "Dream Grey Charm Purple",
+                "color_structure": "multicolor",
+                "finish": "gloss",
+                "reason": "admin_edited_from_catalog",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"id": str(color_id), "status": "approved"}
+    assert service.edit_call == {
+        "color_id": color_id,
+        "display_name": "Dream Grey Charm Purple",
+        "color_structure": "multicolor",
+        "finish": "gloss",
+        "admin_actor_id": 1001,
+        "admin_reason": "admin_edited_from_catalog",
+    }
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_edit_catalog_details() -> None:
+    async with AsyncClient(
+        transport=ASGITransport(app=app_with(EditService())),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.post(
+            f"/api/v1/custom-colors/admin/{uuid4()}/edit",
+            json={
+                "name": "Dream Grey",
+                "color_structure": "solid",
+                "finish": "gloss",
+            },
+        )
+
     assert response.status_code == 403

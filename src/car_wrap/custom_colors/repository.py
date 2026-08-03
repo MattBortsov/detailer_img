@@ -251,6 +251,79 @@ class CustomColorRepository:
         await session.flush()
         return color
 
+    async def edit_details(
+        self,
+        session: AsyncSession,
+        *,
+        color_id: UUID,
+        display_name: str,
+        color_structure: str,
+        finish: str,
+        analysis_revision: str | None,
+        color_profile: dict[str, object] | None,
+        admin_actor_id: int,
+        admin_reason: str | None = None,
+    ) -> CustomColor:
+        """Update catalog metadata and its matching generation profile together."""
+
+        color = await session.scalar(
+            select(CustomColor)
+            .where(
+                CustomColor.id == color_id,
+                CustomColor.status != ColorStatus.DELETED.value,
+            )
+            .with_for_update()
+        )
+        if color is None:
+            raise LookupError("custom color not found")
+        version = await session.scalar(
+            select(CustomColorVersion)
+            .where(
+                CustomColorVersion.custom_color_id == color.id,
+                CustomColorVersion.version == color.current_version,
+            )
+            .with_for_update()
+        )
+        if version is None:
+            raise LookupError("custom color version not found")
+        color.display_name = normalize_display_name(display_name)
+        color.updated_at = datetime.now(UTC)
+        version.color_structure = color_structure
+        version.finish = finish
+        version.analysis_revision = analysis_revision
+        version.color_profile = color_profile
+        session.add(
+            AdminAuditEvent(
+                actor_telegram_user_id=admin_actor_id,
+                custom_color_id=color.id,
+                action="edit",
+                reason=admin_reason,
+            )
+        )
+        await session.flush()
+        return color
+
+    async def current_version(
+        self,
+        session: AsyncSession,
+        *,
+        color_id: UUID,
+    ) -> CustomColorVersion:
+        """Return the live reference for an editable, non-deleted color."""
+
+        version = await session.scalar(
+            select(CustomColorVersion)
+            .join(CustomColor, CustomColor.id == CustomColorVersion.custom_color_id)
+            .where(
+                CustomColor.id == color_id,
+                CustomColor.status != ColorStatus.DELETED.value,
+                CustomColorVersion.version == CustomColor.current_version,
+            )
+        )
+        if version is None:
+            raise LookupError("custom color version not found")
+        return version
+
     async def apply_moderation(
         self,
         session: AsyncSession,

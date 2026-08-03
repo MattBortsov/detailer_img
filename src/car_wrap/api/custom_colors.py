@@ -410,6 +410,36 @@ async def admin_action(
     if not _admin(request, current.telegram_user_id):
         raise HTTPException(status_code=403, detail="Forbidden")
     mutation = payload or CustomColorMutationIn()
+    if action == "edit":
+        if (
+            mutation.name is None
+            or mutation.color_structure is None
+            or mutation.finish is None
+        ):
+            raise HTTPException(status_code=422, detail="Invalid request")
+        service = getattr(request.app.state, "custom_color_service", None)
+        if service is None:
+            raise HTTPException(status_code=503, detail="Service unavailable")
+        try:
+            color = await service.edit_details(
+                session,
+                color_id=color_id,
+                display_name=mutation.name,
+                color_structure=mutation.color_structure,
+                finish=mutation.finish,
+                admin_actor_id=current.telegram_user_id,
+                admin_reason=mutation.reason,
+            )
+        except LookupError:
+            raise _not_found() from None
+        except (MediaValidationError, ValueError):
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid color details",
+            ) from None
+        except OSError:
+            raise HTTPException(status_code=503, detail="Service unavailable") from None
+        return {"id": str(color.id), "status": color.status}
     if action == "rename":
         if mutation.name is None:
             raise HTTPException(status_code=422, detail="Invalid request")

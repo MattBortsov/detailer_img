@@ -32,6 +32,8 @@ _IDEMPOTENCY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 class Storage(Protocol):
     def put(self, data: bytes) -> StoredObject: ...
 
+    def read(self, key: str, expected_sha256: str) -> bytes: ...
+
     def delete(self, key: str) -> None: ...
 
 
@@ -71,6 +73,27 @@ class Repository(Protocol):
         color_id: UUID,
         display_name: str,
         owner_id: int | None = None,
+    ) -> Any: ...
+
+    async def edit_details(
+        self,
+        session: AsyncSession,
+        *,
+        color_id: UUID,
+        display_name: str,
+        color_structure: str,
+        finish: str,
+        analysis_revision: str | None,
+        color_profile: dict[str, object] | None,
+        admin_actor_id: int,
+        admin_reason: str | None = None,
+    ) -> Any: ...
+
+    async def current_version(
+        self,
+        session: AsyncSession,
+        *,
+        color_id: UUID,
     ) -> Any: ...
 
     async def release(
@@ -244,6 +267,65 @@ class CustomColorService:
                 idempotency_key=idempotency_key,
                 result=result,
                 provider_model=self._moderation_model,
+            )
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        return color
+
+    async def edit_details(
+        self,
+        session: AsyncSession,
+        *,
+        color_id: UUID,
+        display_name: str,
+        color_structure: ColorStructure | str,
+        finish: SurfaceFinish | str,
+        admin_actor_id: int,
+        admin_reason: str | None = None,
+    ) -> Any:
+        """Apply administrator metadata changes without changing the reference file."""
+
+        try:
+            normalized_structure = ColorStructure(color_structure)
+            normalized_finish = SurfaceFinish(finish)
+        except ValueError:
+            raise ValueError("invalid custom color metadata") from None
+        if (normalized_structure is ColorStructure.UNSPECIFIED) != (
+            normalized_finish is SurfaceFinish.UNSPECIFIED
+        ):
+            raise ValueError("color structure and finish must be selected together")
+        normalized_name = normalize_display_name(display_name)
+        try:
+            version = await self._repository.current_version(
+                session,
+                color_id=color_id,
+            )
+            source = self._storage.read(version.object_key, version.sha256)
+            profile: ReferenceProfile | None = None
+            if normalized_structure is not ColorStructure.UNSPECIFIED:
+                profile = self._analyze(
+                    source,
+                    normalized_structure,
+                    normalized_finish,
+                    ModerationResult(
+                        ModerationDisposition.APPROVED,
+                        "admin_metadata_edit",
+                        100,
+                        100,
+                    ),
+                )
+            color = await self._repository.edit_details(
+                session,
+                color_id=color_id,
+                display_name=normalized_name,
+                color_structure=normalized_structure.value,
+                finish=normalized_finish.value,
+                analysis_revision=(ANALYSIS_REVISION if profile is not None else None),
+                color_profile=(profile.to_dict() if profile is not None else None),
+                admin_actor_id=admin_actor_id,
+                admin_reason=admin_reason,
             )
             await session.commit()
         except Exception:

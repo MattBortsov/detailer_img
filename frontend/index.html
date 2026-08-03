@@ -134,24 +134,6 @@
               Показать ещё
             </button>
 
-            <details class="management-panel" id="mine-panel">
-              <summary>Мои цвета</summary>
-              <div class="management-list" id="mine-list"></div>
-              <div class="management-empty" id="mine-empty" hidden>
-                <p>Пока что пусто</p>
-                <button class="secondary-button" id="mine-add-color" type="button">
-                  Добавить
-                </button>
-              </div>
-            </details>
-
-            <details class="management-panel admin-panel" id="admin-panel" hidden>
-              <summary>На проверке</summary>
-              <p class="admin-warning">
-                Изображения скрыты до намеренного просмотра администратором.
-              </p>
-              <div class="management-list" id="admin-list"></div>
-            </details>
           </section>
 
           <section
@@ -264,6 +246,52 @@
       </div>
     </dialog>
 
+    <dialog
+      class="edit-color-dialog"
+      id="edit-color-dialog"
+      aria-labelledby="edit-color-title"
+    >
+      <form id="edit-color-form">
+        <header class="dialog-header">
+          <div>
+            <h2 id="edit-color-title">Редактировать цвет</h2>
+            <p>Изменения сразу появятся в каталоге.</p>
+          </div>
+          <button
+            class="icon-button"
+            id="close-edit-color"
+            type="button"
+            aria-label="Закрыть"
+          >×</button>
+        </header>
+        <div class="field">
+          <label for="edit-color-name">Название</label>
+          <input id="edit-color-name" type="text" maxlength="40" required>
+        </div>
+        <div class="edit-color-fields">
+          <div class="field">
+            <label for="edit-color-structure">Категория</label>
+            <select id="edit-color-structure" required>
+              <option value="unspecified">Не указывать</option>
+              <option value="solid">Однотонная</option>
+              <option value="multicolor">Многоцветная</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="edit-color-finish">Поверхность</label>
+            <select id="edit-color-finish" required>
+              <option value="unspecified">Не указывать</option>
+              <option value="matte">Матовая</option>
+              <option value="satin">Сатин</option>
+              <option value="gloss">Глянцевая</option>
+            </select>
+          </div>
+        </div>
+        <p class="dialog-alert" id="edit-color-alert" hidden></p>
+        <button class="confirm-color-submit" type="submit">Сохранить</button>
+      </form>
+    </dialog>
+
     <template id="choice-template">
       <article class="palette-card" data-flipped="false" data-selected="false">
         <div class="card-inner">
@@ -292,6 +320,26 @@
               <span class="card-circle" style="--circle-index: 9"></span>
             </div>
             <span class="selected-badge" aria-hidden="true">✓</span>
+            <div class="admin-card-actions" hidden>
+              <button
+                class="admin-card-edit"
+                type="button"
+                aria-label="Редактировать пользовательский цвет"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m4 16.5-.5 4 4-.5L19 8.5 15.5 5 4 16.5ZM14.5 6l3.5 3.5"></path>
+                </svg>
+              </button>
+              <button
+                class="admin-card-delete"
+                type="button"
+                aria-label="Удалить пользовательский цвет"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"></path>
+                </svg>
+              </button>
+            </div>
             <div class="card-caption">
               <strong class="card-name"></strong>
               <span class="card-kind"></span>

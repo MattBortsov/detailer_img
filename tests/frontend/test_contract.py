@@ -86,6 +86,15 @@ def test_native_card_surfaces_flip_without_coupling_selection() -> None:
     assert all(surface.get("type") == "button" for surface in flip_surfaces)
     assert all(surface.get("aria-expanded") == "false" for surface in flip_surfaces)
     assert 'class="select-button"' in html
+    assert 'class="admin-card-actions" hidden' in html
+    assert 'class="admin-card-edit"' in html
+    assert 'class="admin-card-delete"' in html
+    assert "admin-edit" in js
+    assert "admin-delete" in js
+    assert "mutateAdminColor" in js
+    assert ".admin-card-actions" in css
+    assert ".admin-card-edit" in css
+    assert ".admin-card-delete" in css
     assert 'class="flip-button"' not in html
     assert 'class="back-button"' not in html
     assert '<article class="palette-card"' in html
@@ -278,12 +287,6 @@ def test_user_colors_hands_upload_to_bot_and_exposes_two_filter_axes() -> None:
         for tag, attrs in parser.tags
         if tag == "input" and attrs.get("type") == "file"
     ]
-    mine_add_buttons = [
-        attrs
-        for tag, attrs in parser.tags
-        if tag == "button" and attrs.get("id") == "mine-add-color"
-    ]
-
     assert "СООБЩЕСТВО" not in visible
     assert visible.count("User Colors") == 1
     assert "Цвета, добавленные пользователями и прошедшие проверку." in visible
@@ -296,11 +299,11 @@ def test_user_colors_hands_upload_to_bot_and_exposes_two_filter_axes() -> None:
         "width: 100%"
         in css.split(".user-colors-intro .secondary-button", 1)[1].split("}", 1)[0]
     )
-    assert visible.count("Однотонная") == 1
-    assert visible.count("Многоцветная") == 1
-    assert visible.count("Матовая") == 1
-    assert visible.count("Сатин") == 1
-    assert visible.count("Глянцевая") == 1
+    assert visible.count("Однотонная") >= 1
+    assert visible.count("Многоцветная") >= 1
+    assert visible.count("Матовая") >= 1
+    assert visible.count("Сатин") >= 1
+    assert visible.count("Глянцевая") >= 1
     assert "Поверхность плёнки" in visible
     assert ">Финиш<" not in html
     assert 'data-filter-axis="structure"' in html
@@ -310,24 +313,16 @@ def test_user_colors_hands_upload_to_bot_and_exposes_two_filter_axes() -> None:
     assert 'query.set("finish", state.catalogFinish)' in js
     assert '.filter-options button[aria-pressed="true"]' in css
 
-    assert 'id="mine-empty" hidden' in html
-    assert "Пока что пусто" in visible
-    assert len(mine_add_buttons) == 1
-    assert mine_add_buttons[0].get("type") == "button"
-    assert "Добавить" in parser.text
-    assert "elements.mineEmpty.hidden = state.ownerColors.length !== 0" in js
-    assert 'elements.mineAdd.addEventListener("click", requestCustomColorPrompt)' in js
+    assert 'id="mine-empty"' not in html
+    assert 'id="mine-add-color"' not in html
+    assert "elements.mineEmpty" not in js
+    assert "elements.mineAdd" not in js
     prompt_flow = js.split("async function requestCustomColorPrompt()", 1)[1].split(
         'elements.openAdd.addEventListener("click", requestCustomColorPrompt)', 1
     )[0]
     assert prompt_flow.index("await fetchJson") < prompt_flow.index("openTelegramUrl")
     assert "customColorPromptInFlight" in prompt_flow
     assert "elements.openAdd.disabled = true" in prompt_flow
-    assert "elements.mineAdd.disabled = true" in prompt_flow
-    empty_button = css.split(".management-empty .secondary-button", 1)[1].split("}", 1)[
-        0
-    ]
-    assert "width: 100%" in empty_button
 
 
 def test_chat_action_has_no_bottom_gap_beyond_telegram_safe_area() -> None:
@@ -342,17 +337,18 @@ def test_chat_action_has_no_bottom_gap_beyond_telegram_safe_area() -> None:
     assert html.index("film-warning") < html.index("action-bar")
 
 
-def test_admin_review_requires_explicit_concealed_preview_action() -> None:
-    _, css, js, parser = sources()
+def test_admin_card_actions_are_hidden_from_non_admins() -> None:
+    html, css, js, _ = sources()
 
-    assert "Посмотреть" in js
-    assert "preview_concealed" in js
-    assert "/preview?reveal=true" in js
-    assert ".admin-preview" in css
-    assert not any(
-        tag == "img" and "admin-preview" in (attrs.get("class") or "")
-        for tag, attrs in parser.tags
-    )
+    assert 'class="admin-card-actions" hidden' in html
+    assert "state.isAdmin && customMatch" in js
+    assert "adminActions.hidden = false" in js
+    assert 'adminEdit.dataset.action = "admin-edit"' in js
+    assert 'adminDelete.dataset.action = "admin-delete"' in js
+    assert "edit-color-dialog" in html
+    assert "editColorValuesMatch" in js
+    assert ".edit-color-dialog" in css
+    assert "preview?reveal=true" not in js
 
 
 def test_accessibility_responsive_and_privacy_boundaries() -> None:

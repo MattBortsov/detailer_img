@@ -8,9 +8,7 @@ import {
   beginSubmission,
   completeSubmission,
   createAppState,
-  loadAdminQueue,
   loadCustomCatalog,
-  loadOwnerColors,
   loadPalette,
   paletteFailed,
   selectChoice,
@@ -24,14 +22,8 @@ const BOT_URL_PATTERN = /^https:\/\/t\.me\/[A-Za-z][A-Za-z0-9_]{4,31}$/;
 const SOURCE_PREVIEW_URL = "/api/v1/active-source/image";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const STATUS_COPY = Object.freeze({
-  pending: "На проверке",
-  needs_review: "Нужна проверка администратора",
-  rejected: "Цвет не опубликован",
-  approved: "Опубликован",
-  hidden: "Скрыт",
-});
-
+const CUSTOM_SELECTION_PATTERN =
+  /^custom:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):v[1-9]\d*$/i;
 const elements = {
   loading: document.querySelector("#loading-state"),
   ready: document.querySelector("#ready-state"),
@@ -55,15 +47,17 @@ const elements = {
   alert: document.querySelector("#inline-alert"),
   retry: document.querySelector("#retry-palette"),
   loadMore: document.querySelector("#load-more-colors"),
-  mineList: document.querySelector("#mine-list"),
-  mineEmpty: document.querySelector("#mine-empty"),
-  mineAdd: document.querySelector("#mine-add-color"),
-  adminPanel: document.querySelector("#admin-panel"),
-  adminList: document.querySelector("#admin-list"),
   surprise: document.querySelector("#select-surprise"),
   confirmDialog: document.querySelector("#confirm-color-dialog"),
   confirmSelection: document.querySelector("#confirm-color-selection"),
   closeConfirm: document.querySelector("#close-confirm-color"),
+  editColorDialog: document.querySelector("#edit-color-dialog"),
+  editColorForm: document.querySelector("#edit-color-form"),
+  editColorName: document.querySelector("#edit-color-name"),
+  editColorStructure: document.querySelector("#edit-color-structure"),
+  editColorFinish: document.querySelector("#edit-color-finish"),
+  editColorAlert: document.querySelector("#edit-color-alert"),
+  closeEditColor: document.querySelector("#close-edit-color"),
   openAdd: document.querySelector("#open-add-color"),
   catalogFilters: document.querySelector("#catalog-filters"),
 };
@@ -72,6 +66,7 @@ let state = createAppState();
 let sessionExchangeAttempted = false;
 let catalogLoaded = false;
 let pendingColorId = null;
+let editingColorId = null;
 let replacementInFlight = false;
 let customColorPromptInFlight = false;
 const telegram = window.Telegram?.WebApp;
@@ -190,6 +185,8 @@ function publicCard(item, kind) {
       kindLabel: "",
       displayHex: item.display_hex,
       previewUrl: null,
+      colorStructure: null,
+      finish: null,
     };
   }
   const structures = {
@@ -211,6 +208,8 @@ function publicCard(item, kind) {
     ),
     displayHex: null,
     previewUrl: item.preview_url,
+    colorStructure: item.color_structure,
+    finish: item.finish,
   };
 }
 
@@ -238,6 +237,9 @@ function renderCard(item) {
     '.card-flip-surface[data-face="back"]',
   );
   const select = cardButton(fragment, ".select-button");
+  const adminActions = fragment.querySelector(".admin-card-actions");
+  const adminEdit = cardButton(fragment, ".admin-card-edit");
+  const adminDelete = cardButton(fragment, ".admin-card-delete");
   const flipped = state.flippedId === item.id;
   const selected = state.selectedId === item.id;
 
@@ -256,6 +258,19 @@ function renderCard(item) {
   select.dataset.colorId = item.id;
   select.ariaPressed = String(selected);
   select.textContent = selected ? "Выбрано" : "Выбрать";
+  const customMatch = CUSTOM_SELECTION_PATTERN.exec(item.id);
+  if (state.isAdmin && customMatch && adminActions instanceof HTMLElement) {
+    adminActions.hidden = false;
+    adminEdit.dataset.action = "admin-edit";
+    adminEdit.dataset.colorId = customMatch[1];
+    adminEdit.dataset.colorName = item.name;
+    adminEdit.dataset.colorStructure = item.colorStructure;
+    adminEdit.dataset.colorFinish = item.finish;
+    adminEdit.ariaLabel = `Редактировать цвет ${item.name}`;
+    adminDelete.dataset.action = "admin-delete";
+    adminDelete.dataset.colorId = customMatch[1];
+    adminDelete.ariaLabel = `Удалить цвет ${item.name}`;
+  }
 
   for (const name of fragment.querySelectorAll(".card-name")) {
     name.textContent = item.name;
@@ -307,63 +322,6 @@ function renderCatalogFilters() {
   }
 }
 
-function statusItem(item, admin = false) {
-  const row = document.createElement("div");
-  row.className = "management-item";
-  const copy = document.createElement("div");
-  const name = document.createElement("strong");
-  const status = document.createElement("p");
-  const actions = document.createElement("div");
-  name.textContent = item.name;
-  status.textContent = STATUS_COPY[item.status] ?? item.status;
-  actions.className = "management-actions";
-  copy.append(name, status);
-  row.append(copy, actions);
-
-  const actionNames = admin
-    ? [
-        ["view", "Посмотреть", ""],
-        ["approve", "Одобрить", ""],
-        ["reject", "Отклонить", "danger"],
-        ["delete", "Удалить", "danger"],
-      ]
-    : [
-        ["rename", "Переименовать", ""],
-        ["delete", "Удалить цвет", "danger"],
-      ];
-  for (const [action, label, className] of actionNames) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.managementAction = action;
-    button.dataset.colorId = item.id;
-    if (action === "view") {
-      button.dataset.previewUrl = item.preview_url;
-    }
-    button.textContent = label;
-    button.className = className;
-    actions.append(button);
-  }
-  if (admin) {
-    const preview = document.createElement("img");
-    preview.className = "admin-preview";
-    preview.alt = `Образец цвета ${item.name}`;
-    preview.hidden = true;
-    row.append(preview);
-  }
-  return row;
-}
-
-function renderManagement() {
-  elements.mineList.replaceChildren(
-    ...state.ownerColors.map((item) => statusItem(item)),
-  );
-  elements.mineEmpty.hidden = state.ownerColors.length !== 0;
-  elements.adminPanel.hidden = !state.isAdmin;
-  elements.adminList.replaceChildren(
-    ...state.adminQueue.map((item) => statusItem(item, true)),
-  );
-}
-
 function renderMode() {
   for (const tab of document.querySelectorAll('[role="tab"]')) {
     const active = tab.dataset.mode === state.mode;
@@ -406,7 +364,6 @@ function render() {
   renderMode();
   renderCatalogFilters();
   renderCards();
-  renderManagement();
   elements.form.ariaBusy = String(state.inFlight);
   elements.announcement.textContent = state.announcement;
   elements.alert.hidden = ![
@@ -630,55 +587,6 @@ async function fetchCatalog(append = false) {
   render();
 }
 
-async function fetchOwnerColors() {
-  try {
-    const response = await fetchJson("/api/v1/custom-colors/mine");
-    const payload = await response.json();
-    if (response.ok && Array.isArray(payload.items)) {
-      state = loadOwnerColors(state, payload.items);
-    }
-  } catch {
-    return;
-  }
-  render();
-}
-
-async function fetchAdminQueue() {
-  if (!state.isAdmin) {
-    return;
-  }
-  try {
-    const response = await fetchJson("/api/v1/custom-colors/admin/review");
-    const payload = await response.json();
-    const valid =
-      exactKeys(payload, ["items"]) &&
-      Array.isArray(payload.items) &&
-      payload.items.every(
-        (item) =>
-          exactKeys(item, [
-            "id",
-            "name",
-            "status",
-            "preview_concealed",
-            "preview_url",
-          ]) &&
-          typeof item.id === "string" &&
-          typeof item.name === "string" &&
-          typeof item.status === "string" &&
-          item.preview_concealed === true &&
-          typeof item.preview_url === "string" &&
-          item.preview_url.startsWith("/api/v1/custom-colors/") &&
-          item.preview_url.endsWith("/preview?reveal=true"),
-      );
-    if (response.ok && valid) {
-      state = loadAdminQueue(state, payload.items);
-    }
-  } catch {
-    return;
-  }
-  render();
-}
-
 async function bootstrap() {
   if (!(await exchangeSession())) {
     state = authenticationFailed(state, state.botChatUrl);
@@ -756,13 +664,85 @@ function syncCardFlip(colorId) {
   }
 }
 
-function handleCardAction(event) {
+async function mutateAdminColor(colorId, action, payload) {
+  try {
+    const response = await fetchJson(
+      `/api/v1/custom-colors/admin/${encodeURIComponent(colorId)}/${action}`,
+      {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      },
+    );
+    if (!response.ok) {
+      throw new Error("Admin color mutation failed");
+    }
+    await fetchCatalog();
+    return true;
+  } catch {
+    if (state.view !== "auth_failed") {
+      elements.alert.textContent = "Не удалось изменить цвет. Попробуйте ещё раз.";
+      elements.alert.hidden = false;
+    }
+    return false;
+  }
+}
+
+function editColorValuesMatch() {
+  const structure = elements.editColorStructure.value;
+  const finish = elements.editColorFinish.value;
+  return (
+    (structure === "unspecified" && finish === "unspecified") ||
+    (["solid", "multicolor"].includes(structure) &&
+      ["matte", "satin", "gloss"].includes(finish))
+  );
+}
+
+function openAdminEdit(button) {
+  if (!state.isAdmin || !(elements.editColorDialog instanceof HTMLDialogElement)) {
+    return;
+  }
+  const colorId = button.dataset.colorId;
+  const name = button.dataset.colorName;
+  const structure = button.dataset.colorStructure;
+  const finish = button.dataset.colorFinish;
+  if (!colorId || !name || !structure || !finish) {
+    return;
+  }
+  editingColorId = colorId;
+  elements.editColorName.value = name;
+  elements.editColorStructure.value = structure;
+  elements.editColorFinish.value = finish;
+  elements.editColorAlert.hidden = true;
+  elements.editColorDialog.showModal();
+  elements.editColorName.focus({preventScroll: true});
+}
+
+async function handleCardAction(event) {
   const button = event.target.closest("[data-action]");
   if (!(button instanceof HTMLButtonElement)) {
     return;
   }
   const colorId = button.dataset.colorId;
   if (!colorId) {
+    return;
+  }
+  if (button.dataset.action === "admin-edit") {
+    openAdminEdit(button);
+    return;
+  }
+  if (button.dataset.action === "admin-delete") {
+    if (
+      !state.isAdmin ||
+      !window.confirm(
+        "Удалить цвет? Он исчезнет из каталога и станет недоступен для новых генераций.",
+      )
+    ) {
+      return;
+    }
+    await mutateAdminColor(colorId, "delete", {
+      reason: "admin_deleted_from_catalog",
+    });
     return;
   }
   if (button.dataset.action === "select") {
@@ -778,6 +758,38 @@ function handleCardAction(event) {
     });
   }
 }
+
+elements.closeEditColor.addEventListener("click", () => {
+  elements.editColorDialog.close();
+});
+
+elements.editColorDialog.addEventListener("close", () => {
+  editingColorId = null;
+  elements.editColorAlert.hidden = true;
+});
+
+elements.editColorForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!state.isAdmin || !editingColorId) {
+    return;
+  }
+  const name = elements.editColorName.value.trim();
+  if (!name || !editColorValuesMatch()) {
+    elements.editColorAlert.textContent =
+      "Для категории выберите подходящую поверхность или не указывайте оба поля.";
+    elements.editColorAlert.hidden = false;
+    return;
+  }
+  const saved = await mutateAdminColor(editingColorId, "edit", {
+    name,
+    color_structure: elements.editColorStructure.value,
+    finish: elements.editColorFinish.value,
+    reason: "admin_edited_from_catalog",
+  });
+  if (saved) {
+    elements.editColorDialog.close();
+  }
+});
 
 for (const grid of [elements.colorsGrid, elements.userColorsGrid]) {
   grid.addEventListener("click", handleCardAction);
@@ -809,11 +821,7 @@ for (const tab of document.querySelectorAll('[role="tab"]')) {
     state = activateMode(state, tab.dataset.mode);
     render();
     if (state.mode === "users" && !catalogLoaded) {
-      await Promise.all([
-        fetchCatalog(),
-        fetchOwnerColors(),
-        fetchAdminQueue(),
-      ]);
+      await fetchCatalog();
     }
   });
   tab.addEventListener("keydown", (event) => {
@@ -901,7 +909,6 @@ async function requestCustomColorPrompt() {
   }
   customColorPromptInFlight = true;
   elements.openAdd.disabled = true;
-  elements.mineAdd.disabled = true;
   try {
     const response = await fetchJson("/api/v1/custom-colors/prompt", {
       method: "POST",
@@ -928,12 +935,10 @@ async function requestCustomColorPrompt() {
   } finally {
     customColorPromptInFlight = false;
     elements.openAdd.disabled = false;
-    elements.mineAdd.disabled = false;
   }
 }
 
 elements.openAdd.addEventListener("click", requestCustomColorPrompt);
-elements.mineAdd.addEventListener("click", requestCustomColorPrompt);
 elements.catalogFilters.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-filter-axis]");
   if (!(button instanceof HTMLButtonElement)) {
@@ -952,88 +957,6 @@ elements.catalogFilters.addEventListener("click", async (event) => {
   render();
   await fetchCatalog();
 });
-elements.mineList.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-management-action]");
-  if (!(button instanceof HTMLButtonElement)) {
-    return;
-  }
-  const colorId = button.dataset.colorId;
-  const action = button.dataset.managementAction;
-  if (!colorId || !action) {
-    return;
-  }
-  if (action === "rename") {
-    const name = window.prompt("Новое название цвета");
-    if (!name) {
-      return;
-    }
-    await fetchJson(`/api/v1/custom-colors/${encodeURIComponent(colorId)}`, {
-      method: "PATCH",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({name}),
-    });
-  } else if (
-    window.confirm(
-      "Удалить цвет? Он сразу исчезнет из каталога и станет недоступен для новых запросов.",
-    )
-  ) {
-    await fetchJson(`/api/v1/custom-colors/${encodeURIComponent(colorId)}`, {
-      method: "DELETE",
-    });
-  }
-  await Promise.all([fetchOwnerColors(), fetchCatalog()]);
-});
-
-elements.adminList.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-management-action]");
-  if (!(button instanceof HTMLButtonElement)) {
-    return;
-  }
-  const colorId = button.dataset.colorId;
-  const action = button.dataset.managementAction;
-  if (!colorId || !action) {
-    return;
-  }
-  if (action === "view") {
-    const previewUrl = button.dataset.previewUrl;
-    const preview = button
-      .closest(".management-item")
-      ?.querySelector(".admin-preview");
-    if (
-      !(preview instanceof HTMLImageElement) ||
-      typeof previewUrl !== "string" ||
-      !previewUrl.startsWith("/api/v1/custom-colors/") ||
-      !previewUrl.endsWith("/preview?reveal=true")
-    ) {
-      return;
-    }
-    if (preview.hidden) {
-      preview.src = previewUrl;
-      preview.hidden = false;
-      button.textContent = "Скрыть";
-    } else {
-      preview.removeAttribute("src");
-      preview.hidden = true;
-      button.textContent = "Посмотреть";
-    }
-    return;
-  }
-  const reason =
-    action === "approve" ? null : window.prompt("Причина действия")?.slice(0, 200);
-  if (action !== "approve" && !reason) {
-    return;
-  }
-  await fetchJson(
-    `/api/v1/custom-colors/admin/${encodeURIComponent(colorId)}/${action}`,
-    {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({reason}),
-    },
-  );
-  await Promise.all([fetchAdminQueue(), fetchCatalog()]);
-});
-
 elements.loadMore.addEventListener("click", () => fetchCatalog(true));
 elements.retry.addEventListener("click", fetchPalette);
 for (const button of document.querySelectorAll("[data-open-chat]")) {

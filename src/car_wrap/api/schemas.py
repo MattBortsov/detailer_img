@@ -75,3 +75,5 @@ class CustomColorMutationIn(StrictApiModel):
         max_length=200,
         pattern=r"^[^\x00-\x1f\x7f]*$",
     )
+    color_structure: Literal["unspecified", "solid", "multicolor"] | None = None
+    finish: Literal["unspecified", "matte", "satin", "gloss"] | None = None
