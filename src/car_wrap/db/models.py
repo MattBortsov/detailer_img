@@ -759,7 +759,9 @@ class AdminAuditEvent(Base):
             name="actor_telegram_user_id_positive",
         ),
         CheckConstraint(
-            "action IN ('approve', 'reject', 'rename', 'hide', 'restore', 'delete')",
+            "action IN ("
+            "'approve', 'reject', 'rename', 'edit', 'hide', 'restore', 'delete'"
+            ")",
             name="action_supported",
         ),
     )

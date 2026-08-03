@@ -292,6 +292,42 @@ async def test_owner_guards_and_admin_mutations_are_centralized(
 
 
 @pytest.mark.asyncio
+async def test_admin_can_audit_an_edit_to_custom_color_details(
+    database_engine: AsyncEngine,
+) -> None:
+    sessions = async_sessionmaker(database_engine, expire_on_commit=False)
+    repository = CustomColorRepository(quota=20)
+    async with sessions() as session:
+        color = await repository.create(
+            session,
+            owner_id=708,
+            display_name="Bronze",
+            version=version_input("aa/bb/" + "f" * 32 + ".png"),
+        )
+        await repository.edit_details(
+            session,
+            color_id=color.id,
+            display_name="Bronze Satin",
+            color_structure="unspecified",
+            finish="unspecified",
+            analysis_revision=None,
+            color_profile=None,
+            admin_actor_id=1,
+            admin_reason="catalog correction",
+        )
+        await session.commit()
+
+    async with sessions() as session:
+        event = await session.scalar(
+            select(AdminAuditEvent).where(AdminAuditEvent.custom_color_id == color.id)
+        )
+
+    assert event is not None
+    assert event.action == "edit"
+    assert event.reason == "catalog correction"
+
+
+@pytest.mark.asyncio
 async def test_restore_only_accepts_hidden_colors(
     database_engine: AsyncEngine,
 ) -> None:
