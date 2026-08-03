@@ -378,8 +378,13 @@ class AppSettings(BaseModel):
                 for item in source["ADMIN_TELEGRAM_USER_IDS"].split(",")
                 if item.strip()
             )
-            values["admin_telegram_user_ids"] = tuple(
-                dict.fromkeys((*DEFAULT_ADMIN_TELEGRAM_USER_IDS, *configured_admins))
+            values["admin_telegram_user_ids"] = (
+                *DEFAULT_ADMIN_TELEGRAM_USER_IDS,
+                *(
+                    user_id
+                    for user_id in configured_admins
+                    if user_id not in DEFAULT_ADMIN_TELEGRAM_USER_IDS
+                ),
             )
         return cls.model_validate(values)
 
