@@ -347,6 +347,7 @@ def test_admin_card_actions_are_hidden_from_non_admins() -> None:
     assert 'adminDelete.dataset.action = "admin-delete"' in js
     assert "edit-color-dialog" in html
     assert "editColorValuesMatch" in js
+    assert "elements.editColorAlert.hidden = false" in js
     assert ".edit-color-dialog" in css
     assert "preview?reveal=true" not in js
 

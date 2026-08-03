@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -302,9 +303,18 @@ class CustomColorService:
                 session,
                 color_id=color_id,
             )
-            source = self._storage.read(version.object_key, version.sha256)
             profile: ReferenceProfile | None = None
-            if normalized_structure is not ColorStructure.UNSPECIFIED:
+            if normalized_structure is ColorStructure.UNSPECIFIED:
+                analysis_revision = None
+            elif (
+                version.color_structure == normalized_structure.value
+                and version.color_profile is not None
+            ):
+                existing_profile = ReferenceProfile.from_dict(version.color_profile)
+                profile = replace(existing_profile, finish=normalized_finish)
+                analysis_revision = version.analysis_revision or ANALYSIS_REVISION
+            else:
+                source = self._storage.read(version.object_key, version.sha256)
                 profile = self._analyze(
                     source,
                     normalized_structure,
@@ -316,13 +326,14 @@ class CustomColorService:
                         100,
                     ),
                 )
+                analysis_revision = ANALYSIS_REVISION
             color = await self._repository.edit_details(
                 session,
                 color_id=color_id,
                 display_name=normalized_name,
                 color_structure=normalized_structure.value,
                 finish=normalized_finish.value,
-                analysis_revision=(ANALYSIS_REVISION if profile is not None else None),
+                analysis_revision=analysis_revision,
                 color_profile=(profile.to_dict() if profile is not None else None),
                 admin_actor_id=admin_actor_id,
                 admin_reason=admin_reason,

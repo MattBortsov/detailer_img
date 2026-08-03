@@ -680,6 +680,11 @@ async function mutateAdminColor(colorId, action, payload) {
     await fetchCatalog();
     return true;
   } catch {
+    if (action === "edit" && elements.editColorDialog.open) {
+      elements.editColorAlert.textContent =
+        "Не удалось сохранить изменения. Попробуйте ещё раз.";
+      elements.editColorAlert.hidden = false;
+    }
     if (state.view !== "auth_failed") {
       elements.alert.textContent = "Не удалось изменить цвет. Попробуйте ещё раз.";
       elements.alert.hidden = false;

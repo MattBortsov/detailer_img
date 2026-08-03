@@ -26,6 +26,7 @@ from car_wrap.custom_colors.storage import StoredObject
 class Storage:
     def __init__(self) -> None:
         self.deleted: list[str] = []
+        self.reads = 0
 
     def put(self, data: bytes) -> StoredObject:
         return StoredObject(
@@ -33,6 +34,7 @@ class Storage:
         )
 
     def read(self, key: str, expected_sha256: str) -> bytes:
+        self.reads += 1
         assert key == "aa/bb/" + "c" * 32 + ".png"
         assert expected_sha256 == "d" * 64
         return b"stored-png"
@@ -56,6 +58,10 @@ class Repository:
         self.profiles: list[dict[str, object]] = []
         self.renamed: list[str] = []
         self.edited: list[dict[str, object]] = []
+        self.version_structure = "unspecified"
+        self.version_finish = "unspecified"
+        self.version_analysis_revision: str | None = None
+        self.version_profile: dict[str, object] | None = None
         self.color = Color(uuid4())
 
     async def create(self, session: object, **kwargs: object) -> Color:
@@ -117,6 +123,10 @@ class Repository:
             {
                 "object_key": "aa/bb/" + "c" * 32 + ".png",
                 "sha256": "d" * 64,
+                "color_structure": self.version_structure,
+                "finish": self.version_finish,
+                "analysis_revision": self.version_analysis_revision,
+                "color_profile": self.version_profile,
             },
         )()
 
@@ -266,6 +276,56 @@ async def test_admin_edit_reprofiles_saved_reference_without_new_moderation() ->
             "admin_reason": "admin_edited_from_catalog",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_admin_rename_reuses_the_existing_profile_without_reading_image() -> None:
+    repository = Repository()
+    profile = ReferenceProfile(
+        ColorStructure.MULTICOLOR,
+        SurfaceFinish.GLOSS,
+        82,
+        (
+            ColorCluster("#123456", (10.0, 11.0, 12.0), 0.5, (1, 1, 20, 20)),
+            ColorCluster("#654321", (13.0, 14.0, 15.0), 0.5, (30, 30, 20, 20)),
+        ),
+    )
+    repository.version_structure = "multicolor"
+    repository.version_finish = "gloss"
+    repository.version_analysis_revision = "reference-v1"
+    repository.version_profile = profile.to_dict()
+    storage = Storage()
+    session = Session()
+
+    async def moderate(data: bytes) -> ModerationResult:
+        del data
+        raise AssertionError("metadata edit must not call the moderation provider")
+
+    def analyze(*args: object) -> ReferenceProfile:
+        del args
+        raise AssertionError("existing profile must be reused")
+
+    service = CustomColorService(
+        storage=storage,
+        repository=repository,
+        normalize=lambda data, mime: CanonicalImage(data, mime, 80, 60, "d" * 64),
+        moderate=moderate,
+        analyze=analyze,
+        moderation_model="vision-model",
+    )
+
+    await service.edit_details(
+        session,
+        color_id=repository.color.id,
+        display_name="Renamed Purple",
+        color_structure="multicolor",
+        finish="gloss",
+        admin_actor_id=715709681,
+    )
+
+    assert storage.reads == 0
+    assert repository.edited[0]["analysis_revision"] == "reference-v1"
+    assert repository.edited[0]["color_profile"] == profile.to_dict()
 
 
 @pytest.mark.asyncio
