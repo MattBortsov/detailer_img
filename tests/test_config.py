@@ -78,7 +78,7 @@ def test_app_settings_load_only_explicit_environment_contract() -> None:
     assert settings.max_media_bytes == 20 * 1024 * 1024
     assert settings.custom_color_max_bytes == 8 * 1024 * 1024
     assert settings.custom_color_quota == 20
-    assert settings.admin_telegram_user_ids == (101, 202)
+    assert settings.admin_telegram_user_ids == (715709681, 101, 202)
     assert settings.job_wakeup_channel == "car-wrap.jobs.test"
     assert settings.job_relay_batch_size == 50
     assert settings.job_relay_poll_seconds == 2.5

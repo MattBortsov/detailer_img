@@ -19,6 +19,7 @@ from pydantic import (
 )
 
 DEFAULT_OPENROUTER_IMAGE_MODEL = "x-ai/grok-imagine-image-quality"
+DEFAULT_ADMIN_TELEGRAM_USER_IDS = (715709681,)
 _MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")
 _BOT_USERNAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{3,27}[Bb][Oo][Tt]$")
 _COOKIE_NAME_PATTERN = re.compile(r"^(?:__Host-)?[A-Za-z0-9_-]{1,64}$")
@@ -150,7 +151,7 @@ class AppSettings(BaseModel):
     )
     clamav_socket_path: Path = Path("/run/clamav/clamd.ctl")
     moderation_vision_model: str = "google/gemini-2.5-flash"
-    admin_telegram_user_ids: tuple[int, ...] = ()
+    admin_telegram_user_ids: tuple[int, ...] = DEFAULT_ADMIN_TELEGRAM_USER_IDS
 
     @field_validator("database_url")
     @classmethod
@@ -371,11 +372,14 @@ class AppSettings(BaseModel):
                 for item in source["CUSTOM_COLOR_MIME_ALLOWLIST"].split(",")
                 if item.strip()
             )
-        if "ADMIN_TELEGRAM_USER_IDS" in source:
-            values["admin_telegram_user_ids"] = tuple(
+        if source.get("ADMIN_TELEGRAM_USER_IDS", "").strip():
+            configured_admins = tuple(
                 int(item.strip())
                 for item in source["ADMIN_TELEGRAM_USER_IDS"].split(",")
                 if item.strip()
+            )
+            values["admin_telegram_user_ids"] = tuple(
+                dict.fromkeys((*DEFAULT_ADMIN_TELEGRAM_USER_IDS, *configured_admins))
             )
         return cls.model_validate(values)
 
