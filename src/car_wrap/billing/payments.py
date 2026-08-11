@@ -1,47 +1,50 @@
-"""Stored-order checkout and transactional T-Bank confirmation orchestration."""
+"""Stored-order checkout and transactional Robokassa confirmation."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from car_wrap.billing.catalog import get_payable_product
-from car_wrap.billing.contracts import AllowanceKind, LedgerEntryKind, ProductKind
-from car_wrap.billing.repository import BillingRepository
-from car_wrap.billing.tbank import (
-    PaymentActivationDenied,
-    TBankClient,
-    TBankInitRejected,
-    TBankRequestNotSent,
-    verify_notification_token,
+from car_wrap.billing.contracts import (
+    AllowanceKind,
+    LedgerEntryKind,
+    Product,
+    ProductKind,
 )
+from car_wrap.billing.gateway import (
+    PaymentGatewayClient,
+    PaymentGatewayOutcomeAmbiguous,
+    PaymentGatewayProtocolError,
+    PaymentGatewayRequestNotSent,
+)
+from car_wrap.billing.repository import BillingRepository
 from car_wrap.db.models import (
     AllowanceBalance,
     BillingOrder,
+    RobokassaPayment,
     Subscription,
-    TBankPayment,
 )
 
 
 class PaymentConfirmationError(ValueError):
-    """A public callback did not match a stored T-Bank commercial intent."""
+    """A gateway callback did not match a stored commercial intent."""
 
 
 class PaymentService:
-    """Keep provider data as bounded metadata and grant only in one transaction."""
+    """Keep provider metadata bounded and grant only inside one transaction."""
 
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
-        tbank: TBankClient,
+        gateway: PaymentGatewayClient,
         repository: BillingRepository | None = None,
     ) -> None:
         self._session_factory = session_factory
-        self._tbank = tbank
+        self._gateway = gateway
         self._repository = repository or BillingRepository()
 
     async def start_checkout(
@@ -52,17 +55,23 @@ class PaymentService:
         idempotency_key: str,
         recurring_consent_at: datetime | None = None,
     ) -> tuple[BillingOrder, str]:
-        """Persist a random order before Init with catalog-owned money terms."""
+        """Persist a catalog-priced order and return its signed checkout URL."""
 
+        self._gateway.ensure_available()
         product = get_payable_product(product_id)
         amount_kopecks = product.amount_kopecks
         if amount_kopecks is None:
             raise PaymentConfirmationError
+        if product.kind is ProductKind.MONTHLY and recurring_consent_at is None:
+            raise PaymentConfirmationError("recurring consent is required")
+
         async with self._session_factory() as session:
             async with session.begin():
                 await self._repository.lock_account(session, user_id=user_id)
                 intro_number = await self._next_intro_number(
-                    session, user_id=user_id, product_kind=product.kind
+                    session,
+                    user_id=user_id,
+                    product_kind=product.kind,
                 )
                 order = BillingOrder(
                     telegram_user_id=user_id,
@@ -74,67 +83,47 @@ class PaymentService:
                 )
                 session.add(order)
                 await session.flush()
-                provider_order_id = f"cw-{order.id}"
-                # This row is intentionally written before Init. A signed
-                # webhook can therefore recover even if the process dies
-                # between T-Bank accepting the intent and receiving its reply.
                 session.add(
-                    TBankPayment(
+                    RobokassaPayment(
                         order_id=order.id,
-                        provider_payment_id=None,
-                        provider_order_id=provider_order_id,
+                        invoice_id=None,
+                        previous_invoice_id=None,
                         status="initializing",
                     )
                 )
+
         try:
-            initialized = await self._tbank.init_payment(
-                order_id=provider_order_id,
+            checkout = await self._gateway.create_checkout(
+                external_order_id=str(order.id),
                 amount_kopecks=amount_kopecks,
                 description=f"Car Wrap: {product.id.value}",
-                customer_key=str(user_id),
-                recurrent=product.kind is ProductKind.MONTHLY,
-                operation_initiator_type=(
-                    "0" if product.kind is ProductKind.MONTHLY else None
-                ),
+                recurring=product.kind is ProductKind.MONTHLY,
             )
-        except (PaymentActivationDenied, TBankRequestNotSent, TBankInitRejected):
-            await self._mark_init_failed(provider_order_id)
+        except PaymentGatewayOutcomeAmbiguous:
             raise
-        except Exception:
-            await self._mark_init_ambiguous(provider_order_id)
+        except (PaymentGatewayRequestNotSent, PaymentGatewayProtocolError):
+            await self._mark_gateway_rejected(order_id=order.id)
             raise
-        if initialized.payment_url is None:
-            await self._mark_init_ambiguous(provider_order_id)
-            raise PaymentConfirmationError("T-Bank Init did not return a checkout URL")
-        async with self._session_factory() as session:
-            async with session.begin():
-                payment = await self._payment_for_provider_order(
-                    session, provider_order_id=provider_order_id
-                )
-                if payment is None:
-                    raise PaymentConfirmationError(
-                        "missing persisted payment correlation"
-                    )
-                if payment.provider_payment_id not in (None, initialized.payment_id):
-                    raise PaymentConfirmationError("provider payment ID mismatch")
-                payment.provider_payment_id = initialized.payment_id
-                if payment.status == "initializing":
-                    payment.status = "new"
-        return order, initialized.payment_url
+        await self._record_gateway_invoice(
+            order_id=order.id,
+            invoice_id=checkout.invoice_id,
+            status="pending",
+        )
+        return order, checkout.redirect_url
 
     async def start_renewal(
-        self, *, subscription_id: UUID, now: datetime
+        self,
+        *,
+        subscription_id: UUID,
+        now: datetime,
     ) -> BillingOrder | None:
-        """Claim one due, consented period and ask T-Bank to charge its RebillId.
+        """Create one child invoice and ask Robokassa to start its operation.
 
-        The unique ``subscription_id``/period pair is the durable claim.  A
-        scheduler restart therefore observes the existing order instead of
-        opening another charge for the same monthly period.
+        The accepted recurring response is never treated as payment success.
+        Only a later signed ResultURL can grant the next period.
         """
 
-        initialized_payment_id: str | None = None
-        needs_init = False
-        rebill_id: str | None = None
+        self._gateway.ensure_available()
         async with self._session_factory() as session:
             async with session.begin():
                 subscription = await session.scalar(
@@ -154,112 +143,55 @@ class PaymentService:
                     )
                 )
                 if existing is not None:
-                    payment = await session.scalar(
-                        select(TBankPayment)
-                        .where(TBankPayment.order_id == existing.id)
-                        .with_for_update()
+                    return None
+
+                product = get_payable_product(subscription.product_id)
+                amount_kopecks = product.amount_kopecks
+                parent_invoice_id = subscription.robokassa_parent_invoice_id
+                if amount_kopecks is None or parent_invoice_id is None:
+                    return None
+                order = BillingOrder(
+                    telegram_user_id=subscription.telegram_user_id,
+                    product_id=product.id.value,
+                    amount_kopecks=amount_kopecks,
+                    idempotency_key=f"renewal:{uuid4().hex}",
+                    subscription_id=subscription.id,
+                    renewal_period_start=subscription.billing_period_start,
+                )
+                subscription.renewal_attempted_at = now
+                session.add(order)
+                await session.flush()
+                session.add(
+                    RobokassaPayment(
+                        order_id=order.id,
+                        invoice_id=None,
+                        previous_invoice_id=parent_invoice_id,
+                        status="initializing",
                     )
-                    if payment is None or payment.status != "new":
-                        return None
-                    order = existing
-                    provider_order_id = payment.provider_order_id
-                    initialized_payment_id = payment.provider_payment_id
-                    if initialized_payment_id is None:
-                        return None
-                else:
-                    product = get_payable_product(subscription.product_id)
-                    order = BillingOrder(
-                        telegram_user_id=subscription.telegram_user_id,
-                        product_id=product.id.value,
-                        amount_kopecks=product.amount_kopecks,
-                        idempotency_key=f"renewal:{uuid4().hex}",
-                        subscription_id=subscription.id,
-                        renewal_period_start=subscription.billing_period_start,
-                    )
-                    subscription.renewal_attempted_at = now
-                    session.add(order)
-                    await session.flush()
-                    provider_order_id = f"cw-{order.id}"
-                    session.add(
-                        TBankPayment(
-                            order_id=order.id,
-                            provider_payment_id=None,
-                            provider_order_id=provider_order_id,
-                            status="initializing",
-                        )
-                    )
-                    needs_init = True
-                rebill_id = subscription.provider_rebill_id
+                )
 
         try:
-            if needs_init:
-                initialized = await self._tbank.init_payment(
-                    order_id=provider_order_id,
-                    amount_kopecks=order.amount_kopecks,
-                    description=f"Car Wrap renewal: {order.product_id}",
-                    customer_key=str(order.telegram_user_id),
-                    recurrent=True,
-                    operation_initiator_type="R",
-                )
-                initialized_payment_id = initialized.payment_id
-                await self._record_initialized_payment(
-                    provider_order_id=provider_order_id,
-                    provider_payment_id=initialized_payment_id,
-                )
-            if rebill_id is None:
-                raise PaymentConfirmationError
-            if initialized_payment_id is None:
-                raise PaymentConfirmationError("missing initialized payment ID")
-            charged = await self._tbank.charge(
-                payment_id=initialized_payment_id, rebill_id=rebill_id
+            recurring = await self._gateway.submit_recurring(
+                external_order_id=str(order.id),
+                previous_invoice_id=parent_invoice_id,
+                amount_kopecks=amount_kopecks,
+                description=f"Car Wrap renewal: {order.product_id}",
             )
-        except (PaymentActivationDenied, TBankRequestNotSent, TBankInitRejected):
-            await self._mark_init_failed(provider_order_id)
-            await self.mark_renewal_failed(subscription_id=subscription_id, now=now)
+        except PaymentGatewayOutcomeAmbiguous:
             raise
-        except Exception:
-            await self._mark_init_ambiguous(provider_order_id)
+        except (PaymentGatewayRequestNotSent, PaymentGatewayProtocolError):
+            await self._mark_renewal_rejected(
+                order_id=order.id,
+                subscription_id=subscription_id,
+                now=now,
+            )
             raise
-
-        async with self._session_factory() as session:
-            async with session.begin():
-                payment = await self._payment_for_provider_order(
-                    session, provider_order_id=provider_order_id
-                )
-                if payment is None:
-                    raise PaymentConfirmationError(
-                        "missing persisted payment correlation"
-                    )
-                if payment.provider_payment_id not in (
-                    None,
-                    initialized_payment_id,
-                    charged.payment_id,
-                ):
-                    raise PaymentConfirmationError("provider payment ID mismatch")
-                payment.provider_payment_id = charged.payment_id
-                if payment.status == "initializing":
-                    payment.status = "new"
+        await self._record_gateway_invoice(
+            order_id=order.id,
+            invoice_id=recurring.invoice_id,
+            status="submitted",
+        )
         return order
-
-    async def _record_initialized_payment(
-        self, *, provider_order_id: str, provider_payment_id: str
-    ) -> None:
-        """Make a recurrent Init result durable before the subsequent Charge."""
-
-        async with self._session_factory() as session:
-            async with session.begin():
-                payment = await self._payment_for_provider_order(
-                    session, provider_order_id=provider_order_id
-                )
-                if payment is None:
-                    raise PaymentConfirmationError(
-                        "missing persisted payment correlation"
-                    )
-                if payment.provider_payment_id not in (None, provider_payment_id):
-                    raise PaymentConfirmationError("provider payment ID mismatch")
-                payment.provider_payment_id = provider_payment_id
-                if payment.status == "initializing":
-                    payment.status = "new"
 
     async def _next_intro_number(
         self,
@@ -279,51 +211,85 @@ class PaymentService:
                 "introductory purchases are exhausted"
             ) from exc
 
-    async def _payment_for_provider_order(
-        self, session: AsyncSession, *, provider_order_id: str
-    ) -> TBankPayment | None:
+    async def _payment_for_order(
+        self,
+        session: AsyncSession,
+        *,
+        order_id: UUID,
+    ) -> RobokassaPayment | None:
         payment = await session.scalar(
-            select(TBankPayment)
-            .where(TBankPayment.provider_order_id == provider_order_id)
+            select(RobokassaPayment)
+            .where(RobokassaPayment.order_id == order_id)
             .with_for_update()
         )
-        return payment if isinstance(payment, TBankPayment) else None
+        return payment if isinstance(payment, RobokassaPayment) else None
 
-    async def _mark_init_failed(self, provider_order_id: str) -> None:
-        """Record a known failed Init without ever deleting audit correlation."""
-
+    async def _record_gateway_invoice(
+        self,
+        *,
+        order_id: UUID,
+        invoice_id: int,
+        status: str,
+    ) -> None:
         async with self._session_factory() as session:
             async with session.begin():
-                payment = await self._payment_for_provider_order(
-                    session, provider_order_id=provider_order_id
+                payment = await self._payment_for_order(
+                    session,
+                    order_id=order_id,
                 )
+                if payment is None:
+                    raise PaymentConfirmationError("gateway order is unavailable")
+                if payment.invoice_id not in {None, invoice_id}:
+                    raise PaymentConfirmationError("gateway invoice mismatch")
+                # A recurring ResultURL can arrive before the gateway HTTP
+                # response. Confirmation already persisted the same invoice,
+                # so this late response must not turn success into an error.
+                if payment.status == "confirmed":
+                    return
+                if payment.status != "initializing":
+                    raise PaymentConfirmationError(
+                        "gateway order is no longer initializing"
+                    )
+                payment.invoice_id = invoice_id
+                payment.status = status
+
+    async def _mark_gateway_rejected(self, *, order_id: UUID) -> None:
+        async with self._session_factory() as session:
+            async with session.begin():
+                payment = await self._payment_for_order(session, order_id=order_id)
                 if payment is None or payment.status == "confirmed":
                     return
                 payment.status = "rejected"
                 order = await session.get(
-                    BillingOrder, payment.order_id, with_for_update=True
+                    BillingOrder,
+                    order_id,
+                    with_for_update=True,
                 )
                 if order is not None and order.status == "pending":
                     order.status = "failed"
 
-    async def _mark_init_ambiguous(self, provider_order_id: str) -> None:
-        """Keep correlation and order eligibility for a later signed webhook."""
-
-        async with self._session_factory() as session:
-            async with session.begin():
-                payment = await self._payment_for_provider_order(
-                    session, provider_order_id=provider_order_id
-                )
-                if payment is not None and payment.status == "initializing":
-                    payment.status = "ambiguous"
-
-    async def mark_renewal_failed(
-        self, *, subscription_id: UUID, now: datetime
+    async def _mark_renewal_rejected(
+        self,
+        *,
+        order_id: UUID,
+        subscription_id: UUID,
+        now: datetime,
     ) -> None:
-        """Record a bounded, truthful retry state without touching packages."""
+        """Record a definitive failure without touching package allowances."""
 
         async with self._session_factory() as session:
             async with session.begin():
+                payment = await self._payment_for_order(session, order_id=order_id)
+                if payment is None or payment.status == "confirmed":
+                    return
+                payment.status = "rejected"
+                order = await session.get(
+                    BillingOrder,
+                    payment.order_id,
+                    with_for_update=True,
+                )
+                if order is not None and order.status == "pending":
+                    order.status = "failed"
                 subscription = await session.scalar(
                     select(Subscription)
                     .where(Subscription.id == subscription_id)
@@ -333,8 +299,7 @@ class PaymentService:
                     return
                 subscription.renewal_failure_count += 1
                 subscription.renewal_attempted_at = now
-                if subscription.renewal_failure_count >= 3:
-                    subscription.status = "past_due"
+                subscription.status = "past_due"
 
     @staticmethod
     def _eligible_renewal(subscription: Subscription | None, now: datetime) -> bool:
@@ -343,7 +308,8 @@ class PaymentService:
         product = get_payable_product(subscription.product_id)
         return bool(
             subscription.status == "active"
-            and subscription.provider_rebill_id
+            and subscription.cancelled_at is None
+            and subscription.robokassa_parent_invoice_id
             and subscription.auto_renew_consent_at
             and subscription.consent_amount_kopecks == product.amount_kopecks
             and subscription.consent_period_days == 30
@@ -354,71 +320,88 @@ class PaymentService:
     def production_available(self) -> bool:
         """Expose only the fail-closed movement predicate to transport adapters."""
 
-        return self._tbank.production_available
+        return self._gateway.production_available
 
-    async def confirm_webhook(self, payload: dict[str, Any]) -> int | None:
+    def verify_gateway_callback(
+        self,
+        *,
+        timestamp: str | None,
+        signature: str | None,
+        body: bytes,
+    ) -> bool:
+        return self._gateway.verify_callback(
+            timestamp=timestamp,
+            signature=signature,
+            body=body,
+        )
+
+    async def confirm_result(
+        self,
+        *,
+        external_order_id: str,
+        invoice_id: int,
+        amount_kopecks: int,
+    ) -> int | None:
         """Confirm once and return the credited Telegram user for notification."""
 
-        if not verify_notification_token(payload, self._tbank.webhook_password):
-            return None
-        payment_id = payload.get("PaymentId")
-        order_id = payload.get("OrderId")
-        amount = payload.get("Amount")
-        if (
-            not isinstance(payment_id, str)
-            or not isinstance(order_id, str)
-            or amount is None
-            or isinstance(amount, bool)
-        ):
-            return None
         try:
-            amount_kopecks = int(amount)
-        except (TypeError, ValueError):
-            return None
-        if (
-            payload.get("Status") != "CONFIRMED"
-            or payload.get("TerminalKey") != self._tbank.terminal_key
-            or payload.get("Currency", "RUB") != "RUB"
-        ):
-            return None
+            order_id = UUID(external_order_id)
+        except ValueError as exc:
+            raise PaymentConfirmationError("invalid gateway order ID") from exc
+        if invoice_id <= 0 or amount_kopecks <= 0:
+            raise PaymentConfirmationError("invalid gateway payment")
+
         async with self._session_factory() as session:
             async with session.begin():
-                payment = await self._payment_for_provider_order(
-                    session, provider_order_id=order_id
-                )
-                if payment is None or payment.status == "confirmed":
-                    return None
-                if payment.provider_payment_id not in (None, payment_id):
-                    return None
+                payment = await self._payment_for_order(session, order_id=order_id)
+                if payment is None:
+                    raise PaymentConfirmationError("unknown gateway order")
                 order = await session.scalar(
                     select(BillingOrder)
-                    .where(BillingOrder.id == payment.order_id)
+                    .where(BillingOrder.id == order_id)
                     .with_for_update()
                 )
-                if (
-                    order is None
-                    or order.status != "pending"
-                    or order.amount_kopecks != amount_kopecks
-                    or order.currency != "RUB"
-                ):
-                    return None
+                if order is None:
+                    raise PaymentConfirmationError("missing persisted order")
+                if payment.invoice_id not in {None, invoice_id}:
+                    raise PaymentConfirmationError("gateway invoice mismatch")
+                if amount_kopecks != order.amount_kopecks or order.currency != "RUB":
+                    raise PaymentConfirmationError("gateway amount mismatch")
                 product = get_payable_product(order.product_id)
                 if product.amount_kopecks != order.amount_kopecks:
+                    raise PaymentConfirmationError("catalog amount mismatch")
+                if payment.status == "confirmed" and order.status == "confirmed":
                     return None
+                if payment.status not in {"initializing", "pending", "submitted"}:
+                    raise PaymentConfirmationError("invoice is not confirmable")
+                if order.status != "pending":
+                    raise PaymentConfirmationError("order is not pending")
+
                 await self._repository.lock_account(
-                    session, user_id=order.telegram_user_id
+                    session,
+                    user_id=order.telegram_user_id,
                 )
-                now = datetime.now(UTC)
-                payment.provider_payment_id = payment_id
+                confirmed_at = datetime.now(UTC)
+                payment.invoice_id = invoice_id
                 payment.status = "confirmed"
-                payment.confirmed_at = now
+                payment.confirmed_at = confirmed_at
                 order.status = "confirmed"
-                order.confirmed_at = now
+                order.confirmed_at = confirmed_at
                 if order.subscription_id is not None:
-                    await self._renew_subscription(session, order, product, now)
+                    await self._renew_subscription(
+                        session,
+                        order,
+                        payment,
+                        product,
+                        confirmed_at,
+                    )
                 else:
                     await self._grant_purchase(
-                        session, order, product.kind, product.allowance, now, payload
+                        session,
+                        order,
+                        payment,
+                        product,
+                        confirmed_at,
                     )
                 credited_user_id = order.telegram_user_id
         return credited_user_id
@@ -427,31 +410,28 @@ class PaymentService:
         self,
         session: AsyncSession,
         order: BillingOrder,
-        product_kind: ProductKind,
-        allowance: int | None,
+        payment: RobokassaPayment,
+        product: Product,
         now: datetime,
-        payload: dict[str, Any],
     ) -> None:
-        if allowance is None:
+        allowance = product.allowance
+        if allowance is None or payment.previous_invoice_id is not None:
             raise PaymentConfirmationError
         subscription_id: UUID | None = None
         expires_at: datetime | None = None
         allowance_kind = (
             AllowanceKind.INTRO
-            if product_kind is ProductKind.INTRO
+            if product.kind is ProductKind.INTRO
             else AllowanceKind.PACKAGE
         )
-        if product_kind is ProductKind.MONTHLY:
-            rebill_id = payload.get("RebillId")
-            if not isinstance(rebill_id, str) or not rebill_id or len(rebill_id) > 128:
-                raise PaymentConfirmationError
-            if order.recurring_consent_at is None:
+        if product.kind is ProductKind.MONTHLY:
+            if order.recurring_consent_at is None or payment.invoice_id is None:
                 raise PaymentConfirmationError
             subscription = Subscription(
                 telegram_user_id=order.telegram_user_id,
                 product_id=order.product_id,
                 status="active",
-                provider_rebill_id=rebill_id,
+                robokassa_parent_invoice_id=payment.invoice_id,
                 billing_period_start=now,
                 billing_period_end=now + timedelta(days=30),
                 auto_renew_consent_at=order.recurring_consent_at,
@@ -495,7 +475,7 @@ class PaymentService:
             order_id=order.id,
             occurred_at=now,
         )
-        if product_kind is not ProductKind.INTRO:
+        if product.kind is not ProductKind.INTRO:
             bonus = await self._repository.balance(
                 session,
                 user_id=order.telegram_user_id,
@@ -525,7 +505,8 @@ class PaymentService:
         self,
         session: AsyncSession,
         order: BillingOrder,
-        product: Any,
+        payment: RobokassaPayment,
+        product: Product,
         now: datetime,
     ) -> None:
         """Retire the old monthly quota and grant exactly one confirmed period."""
@@ -538,6 +519,8 @@ class PaymentService:
         if (
             subscription is None
             or order.renewal_period_start != subscription.billing_period_start
+            or payment.previous_invoice_id
+            != subscription.robokassa_parent_invoice_id
         ):
             raise PaymentConfirmationError
         if product.allowance is None:

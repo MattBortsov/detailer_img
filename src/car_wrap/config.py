@@ -153,14 +153,14 @@ class AppSettings(BaseModel):
     moderation_vision_model: str = "google/gemini-2.5-flash"
     admin_telegram_user_ids: tuple[int, ...] = DEFAULT_ADMIN_TELEGRAM_USER_IDS
     daily_stats_hour_utc: int = Field(default=9, strict=True, ge=0, le=23)
-    tbank_terminal_key: str | None = None
-    tbank_password: SecretStr | None = None
-    tbank_api_base_url: str = "https://securepay.tinkoff.ru/v2"
-    tbank_notification_url: str | None = None
-    tbank_success_url: str | None = None
-    tbank_fail_url: str | None = None
-    payments_production_enabled: bool = Field(default=False, strict=True)
-    payments_owner_approved: bool = Field(default=False, strict=True)
+    payment_gateway_base_url: str | None = None
+    payment_gateway_secret: SecretStr | None = None
+    payment_gateway_max_clock_skew_seconds: int = Field(
+        default=300,
+        strict=True,
+        ge=30,
+        le=900,
+    )
     payments_phase1_report_path: Path = Path("eval/reports/phase-01.json")
     ultima_manager_contact_url: str | None = None
     subscription_scan_seconds: float = Field(default=300.0, gt=0, le=3600)
@@ -227,14 +227,9 @@ class AppSettings(BaseModel):
             raise ValueError("manager contact must be a clean HTTPS Telegram link")
         return value.rstrip("/")
 
-    @field_validator(
-        "tbank_api_base_url",
-        "tbank_notification_url",
-        "tbank_success_url",
-        "tbank_fail_url",
-    )
+    @field_validator("payment_gateway_base_url")
     @classmethod
-    def validate_tbank_urls(cls, value: str | None) -> str | None:
+    def validate_payment_gateway_base_url(cls, value: str | None) -> str | None:
         if value is None:
             return None
         parsed = urlsplit(value)
@@ -246,8 +241,21 @@ class AppSettings(BaseModel):
             or parsed.query
             or parsed.fragment
         ):
-            raise ValueError("T-Bank URL must be a clean HTTPS URL")
+            raise ValueError("payment gateway URL must be a clean HTTPS URL")
         return value.rstrip("/")
+
+    @field_validator("payment_gateway_secret")
+    @classmethod
+    def validate_payment_gateway_secret(
+        cls,
+        value: SecretStr | None,
+    ) -> SecretStr | None:
+        if value is None:
+            return None
+        secret = value.get_secret_value()
+        if secret != secret.strip() or not 32 <= len(secret) <= 256:
+            raise ValueError("payment gateway secret must contain 32-256 characters")
+        return value
 
     @field_validator("payments_phase1_report_path")
     @classmethod
@@ -380,12 +388,8 @@ class AppSettings(BaseModel):
             "CUSTOM_COLOR_STORAGE_ROOT": "custom_color_storage_root",
             "CLAMAV_SOCKET_PATH": "clamav_socket_path",
             "MODERATION_VISION_MODEL": "moderation_vision_model",
-            "TBANK_TERMINAL_KEY": "tbank_terminal_key",
-            "TBANK_PASSWORD": "tbank_password",
-            "TBANK_API_BASE_URL": "tbank_api_base_url",
-            "TBANK_NOTIFICATION_URL": "tbank_notification_url",
-            "TBANK_SUCCESS_URL": "tbank_success_url",
-            "TBANK_FAIL_URL": "tbank_fail_url",
+            "PAYMENT_GATEWAY_BASE_URL": "payment_gateway_base_url",
+            "PAYMENT_GATEWAY_SECRET": "payment_gateway_secret",
             "PAYMENTS_PHASE1_REPORT_PATH": "payments_phase1_report_path",
             "ULTIMA_MANAGER_CONTACT_URL": "ultima_manager_contact_url",
         }
@@ -419,18 +423,13 @@ class AppSettings(BaseModel):
             "PROVIDER_MAX_IMAGE_PIXELS": "provider_max_image_pixels",
             "TELEGRAM_RESULT_MAX_BYTES": "telegram_result_max_bytes",
             "TELEGRAM_RESULT_MAX_SIDE_SUM": "telegram_result_max_side_sum",
+            "PAYMENT_GATEWAY_MAX_CLOCK_SKEW_SECONDS": (
+                "payment_gateway_max_clock_skew_seconds"
+            ),
         }
         for environment_name, field_name in string_fields.items():
             if environment_name in source:
                 values[field_name] = source[environment_name]
-        boolean_fields = {
-            "PAYMENTS_PRODUCTION_ENABLED": "payments_production_enabled",
-            "PAYMENTS_OWNER_APPROVED": "payments_owner_approved",
-        }
-        for environment_name, field_name in boolean_fields.items():
-            if environment_name in source:
-                raw = source[environment_name].strip().lower()
-                values[field_name] = raw == "true" if raw in {"true", "false"} else raw
         for environment_name, field_name in integer_fields.items():
             if environment_name in source:
                 values[field_name] = int(source[environment_name])

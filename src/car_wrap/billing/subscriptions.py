@@ -13,8 +13,8 @@ from car_wrap.billing.payments import PaymentService
 from car_wrap.db.models import Subscription
 
 RENEWAL_FAILURE_COPY = (
-    "Не удалось продлить подписку. Автосписание остановлено после нескольких "
-    "неудачных попыток; пакеты генераций сохранены."
+    "Не удалось продлить подписку. Автосписание остановлено; "
+    "пакеты генераций сохранены."
 )
 
 
@@ -40,7 +40,8 @@ class SubscriptionService:
                         select(Subscription.id).where(
                             Subscription.status == "active",
                             Subscription.billing_period_end <= current,
-                            Subscription.provider_rebill_id.is_not(None),
+                            Subscription.robokassa_parent_invoice_id.is_not(None),
+                            Subscription.cancelled_at.is_(None),
                             Subscription.auto_renew_consent_at.is_not(None),
                             Subscription.renewal_failure_count < 3,
                         )

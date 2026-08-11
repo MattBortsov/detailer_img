@@ -42,6 +42,7 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "RUF"]
 [tool.ruff.lint.per-file-ignores]
 "src/car_wrap/bot/router.py" = ["RUF001"]
 "src/car_wrap/bot/delivery.py" = ["RUF001"]
+"tests/**/*.py" = ["S101"]
 
 [tool.mypy]
 python_version = "3.13"

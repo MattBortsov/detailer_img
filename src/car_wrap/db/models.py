@@ -897,17 +897,28 @@ class BillingOrder(Base):
     )
 
 
-class TBankPayment(Base):
-    """Bounded T-Bank status metadata; no signed request or card data is stored."""
+class RobokassaPayment(Base):
+    """Bounded Robokassa invoice correlation; no card data is stored."""
 
-    __tablename__ = "tbank_payments"
+    __tablename__ = "robokassa_payments"
     __table_args__ = (
         UniqueConstraint("order_id"),
-        UniqueConstraint("provider_payment_id"),
-        UniqueConstraint("provider_order_id"),
+        UniqueConstraint("invoice_id"),
         CheckConstraint(
-            "status IN ('initializing', 'ambiguous', 'new', 'authorized', "
-            "'confirmed', 'rejected', 'cancelled')",
+            "invoice_id IS NULL OR invoice_id > 0",
+            name="invoice_id_positive",
+        ),
+        CheckConstraint(
+            "previous_invoice_id IS NULL OR previous_invoice_id > 0",
+            name="previous_invoice_id_positive",
+        ),
+        CheckConstraint(
+            "previous_invoice_id IS NULL OR previous_invoice_id <> invoice_id",
+            name="parent_invoice_differs",
+        ),
+        CheckConstraint(
+            "status IN ('initializing', 'pending', 'submitted', "
+            "'confirmed', 'rejected')",
             name="status_supported",
         ),
     )
@@ -918,12 +929,11 @@ class TBankPayment(Base):
     order_id: Mapped[UUID] = mapped_column(
         ForeignKey("billing_orders.id", ondelete="RESTRICT"), nullable=False
     )
-    # Init's PaymentId does not exist until after the external request.  The
-    # provider OrderId is therefore the durable correlation key persisted
-    # before crossing the network boundary.
-    provider_payment_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    provider_order_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    invoice_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    previous_invoice_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )
     confirmed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -947,6 +957,11 @@ class Subscription(Base):
         CheckConstraint(
             "billing_period_end > billing_period_start", name="billing_period_order"
         ),
+        CheckConstraint(
+            "robokassa_parent_invoice_id IS NULL "
+            "OR robokassa_parent_invoice_id > 0",
+            name="robokassa_parent_invoice_id_positive",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -958,8 +973,8 @@ class Subscription(Base):
     )
     product_id: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
-    provider_rebill_id: Mapped[str | None] = mapped_column(
-        String(128), nullable=True, unique=True
+    robokassa_parent_invoice_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, unique=True
     )
     billing_period_start: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

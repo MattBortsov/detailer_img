@@ -8,10 +8,10 @@ import logging
 import httpx
 from aiogram import Bot, Dispatcher
 
+from car_wrap.billing.gateway import PaymentGatewayClient
 from car_wrap.billing.payments import PaymentService
 from car_wrap.billing.runtime import start_subscription_scanner
 from car_wrap.billing.subscriptions import SubscriptionService
-from car_wrap.billing.tbank import TBankClient
 from car_wrap.bot.router import create_router
 from car_wrap.config import AppSettings
 from car_wrap.custom_colors.runtime import build_custom_color_service
@@ -40,7 +40,7 @@ async def run_polling(settings: AppSettings) -> None:
         window_seconds=settings.job_limit_window_seconds,
     )
     dispatcher = Dispatcher()
-    payments = PaymentService(sessions, TBankClient(settings))
+    payments = PaymentService(sessions, PaymentGatewayClient(settings))
     subscriptions = SubscriptionService(sessions, payments)
     dispatcher.include_router(
         create_router(

@@ -10,8 +10,8 @@ from aiogram import Bot
 from fastapi import FastAPI
 
 from car_wrap.api.app import create_app
+from car_wrap.billing.gateway import PaymentGatewayClient
 from car_wrap.billing.payments import PaymentService
-from car_wrap.billing.tbank import TBankClient
 from car_wrap.config import AppSettings
 from car_wrap.custom_colors.runtime import build_custom_color_service
 from car_wrap.db.session import create_session_factory
@@ -39,7 +39,7 @@ def build_application() -> FastAPI:
         window_seconds=settings.job_limit_window_seconds,
     )
     telegram_bot = Bot(token=settings.bot_token.get_secret_value())
-    payment_service = PaymentService(sessions, TBankClient(settings))
+    payment_service = PaymentService(sessions, PaymentGatewayClient(settings))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
