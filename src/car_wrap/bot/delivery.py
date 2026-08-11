@@ -23,6 +23,10 @@ from car_wrap.jobs.contracts import DeliveryReceipt, ExecutionErrorCode
 
 GENERATION_STARTED_COPY = "🎨 Генерация запущена. Результат придёт в этот чат."
 MENU_CALLBACK_DATA = "main_menu"
+PAYMENT_CONFIRMED_COPY = (
+    "✅ Оплата прошла! Баланс генераций пополнен.\n\n"
+    "Нажмите «Сгенерировать», чтобы выбрать цвет и запустить генерацию."
+)
 _DISCLAIMER = (
     "Это AI-визуализация. Реальный цвет может отличаться "
     "в зависимости от вашего экрана."
@@ -107,6 +111,25 @@ def result_keyboard(mini_app_url: str) -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(
                     text="Новая генерация",
+                    web_app=WebAppInfo(url=mini_app_url),
+                ),
+                InlineKeyboardButton(
+                    text="Меню",
+                    callback_data=MENU_CALLBACK_DATA,
+                ),
+            ]
+        ]
+    )
+
+
+def payment_confirmed_keyboard(mini_app_url: str) -> InlineKeyboardMarkup:
+    """Offer the next useful action after a confirmed purchase."""
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Сгенерировать",
                     web_app=WebAppInfo(url=mini_app_url),
                 ),
                 InlineKeyboardButton(

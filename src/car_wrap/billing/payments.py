@@ -353,11 +353,11 @@ class PaymentService:
 
         return self._tbank.production_available
 
-    async def confirm_webhook(self, payload: dict[str, Any]) -> bool:
-        """Correlate all trusted scalar facts then append grants exactly once."""
+    async def confirm_webhook(self, payload: dict[str, Any]) -> int | None:
+        """Confirm once and return the credited Telegram user for notification."""
 
         if not verify_notification_token(payload, self._tbank.webhook_password):
-            return False
+            return None
         payment_id = payload.get("PaymentId")
         order_id = payload.get("OrderId")
         amount = payload.get("Amount")
@@ -367,26 +367,26 @@ class PaymentService:
             or amount is None
             or isinstance(amount, bool)
         ):
-            return False
+            return None
         try:
             amount_kopecks = int(amount)
         except (TypeError, ValueError):
-            return False
+            return None
         if (
             payload.get("Status") != "CONFIRMED"
             or payload.get("TerminalKey") != self._tbank.terminal_key
             or payload.get("Currency", "RUB") != "RUB"
         ):
-            return False
+            return None
         async with self._session_factory() as session:
             async with session.begin():
                 payment = await self._payment_for_provider_order(
                     session, provider_order_id=order_id
                 )
                 if payment is None or payment.status == "confirmed":
-                    return False
+                    return None
                 if payment.provider_payment_id not in (None, payment_id):
-                    return False
+                    return None
                 order = await session.scalar(
                     select(BillingOrder)
                     .where(BillingOrder.id == payment.order_id)
@@ -398,10 +398,10 @@ class PaymentService:
                     or order.amount_kopecks != amount_kopecks
                     or order.currency != "RUB"
                 ):
-                    return False
+                    return None
                 product = get_payable_product(order.product_id)
                 if product.amount_kopecks != order.amount_kopecks:
-                    return False
+                    return None
                 await self._repository.lock_account(
                     session, user_id=order.telegram_user_id
                 )
@@ -417,7 +417,8 @@ class PaymentService:
                     await self._grant_purchase(
                         session, order, product.kind, product.allowance, now, payload
                     )
-        return True
+                credited_user_id = order.telegram_user_id
+        return credited_user_id
 
     async def _grant_purchase(
         self,

@@ -53,7 +53,11 @@ UNSUPPORTED_MESSAGE_COPY = (
 )
 WINNING_SOURCE_COPY = "Теперь выберите цвет."
 OLDER_SOURCE_COPY = "Фото принято, но для оклейки уже выбрано более новое фото."
-MENU_COPY = "Отправьте новое фото или выберите другой цвет для текущего."
+INFO_CALLBACK_PREFIX = "info:"
+INFO_HOW_TO = "how_to"
+INFO_PRICES = "prices"
+INFO_SUPPORT = "support"
+INFO_PRIVACY = "privacy"
 OPEN_APP_COPY = "Откройте приложение кнопкой ниже."
 REPLACE_PHOTO_COPY = "Пришлите новое фото"
 REPLACE_PHOTO_CANCEL_CALLBACK_DATA = "replace_photo:cancel"
@@ -205,6 +209,44 @@ def palette_keyboard(
                     web_app=WebAppInfo(url=settings.mini_app_url),
                 )
             ]
+        ]
+    )
+
+
+def menu_keyboard(settings: AppSettings) -> InlineKeyboardMarkup:
+    """Keep the primary actions and common service information in one menu."""
+
+    support_button = InlineKeyboardButton(
+        text="Поддержка",
+        url=settings.ultima_manager_contact_url,
+    ) if settings.ultima_manager_contact_url else InlineKeyboardButton(
+        text="Поддержка", callback_data=f"{INFO_CALLBACK_PREFIX}{INFO_SUPPORT}"
+    )
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Сгенерировать",
+                    web_app=WebAppInfo(url=settings.mini_app_url),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Как это работает",
+                    callback_data=f"{INFO_CALLBACK_PREFIX}{INFO_HOW_TO}",
+                ),
+                InlineKeyboardButton(
+                    text="Тарифы",
+                    callback_data=f"{INFO_CALLBACK_PREFIX}{INFO_PRICES}",
+                ),
+            ],
+            [
+                support_button,
+                InlineKeyboardButton(
+                    text="Конфиденциальность",
+                    callback_data=f"{INFO_CALLBACK_PREFIX}{INFO_PRIVACY}",
+                ),
+            ],
         ]
     )
 
@@ -937,9 +979,50 @@ async def handle_menu_callback(
         return
     await bot.send_message(
         message.chat.id,
-        MENU_COPY,
-        reply_markup=palette_keyboard(text="Выбрать цвет", settings=settings),
+        "Меню",
+        reply_markup=menu_keyboard(settings),
     )
+
+
+async def handle_info_callback(callback: CallbackQuery, *, bot: Bot) -> None:
+    """Send concise, standard service information from the bot menu."""
+
+    await bot.answer_callback_query(callback.id)
+    message = callback.message
+    if (
+        message is None
+        or message.chat.type != ChatType.PRIVATE
+        or message.chat.id != callback.from_user.id
+    ):
+        return
+    section = (callback.data or "")[len(INFO_CALLBACK_PREFIX) :]
+    copy = {
+        INFO_HOW_TO: (
+            "Как это работает:\n\n"
+            "1. Отправьте фото автомобиля или мотоцикла.\n"
+            "2. Откройте палитру и выберите цвет.\n"
+            "3. Получите AI-визуализацию в этом чате."
+        ),
+        INFO_PRICES: (
+            "Тарифы:\n\n"
+            "1 генерация — 25 ₽\n"
+            "Пакеты: 5 — 149 ₽, 15 — 349 ₽, 40 — 749 ₽\n"
+            "Plus: 30 — 499 ₽/месяц\n"
+            "Studio: 100 — 1 499 ₽/месяц"
+        ),
+        INFO_SUPPORT: (
+            "Поддержка:\n\n"
+            "Опишите вопрос сообщением в этом чате. Если он связан с оплатой, "
+            "укажите дату и сумму платежа."
+        ),
+        INFO_PRIVACY: (
+            "Конфиденциальность:\n\n"
+            "Мы не сохраняем файлы изображений на сервере. Фото обрабатываются "
+            "Telegram и AI-провайдером только для создания визуализации."
+        ),
+    }.get(section)
+    if copy is not None:
+        await bot.send_message(message.chat.id, copy)
 
 
 async def handle_replace_photo_cancel_callback(
@@ -1132,6 +1215,10 @@ def create_router(
     @router.callback_query(F.data == MENU_CALLBACK_DATA)
     async def menu_handler(callback: CallbackQuery, bot: Bot) -> None:
         await handle_menu_callback(callback, bot=bot, settings=settings)
+
+    @router.callback_query(F.data.startswith(INFO_CALLBACK_PREFIX))
+    async def info_handler(callback: CallbackQuery, bot: Bot) -> None:
+        await handle_info_callback(callback, bot=bot)
 
     @router.callback_query(F.data == REPLACE_PHOTO_CANCEL_CALLBACK_DATA)
     async def replace_photo_cancel_handler(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -9,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from car_wrap.billing.payments import PaymentService
 from car_wrap.billing.tbank import verify_notification_token
+from car_wrap.bot.delivery import PAYMENT_CONFIRMED_COPY, payment_confirmed_keyboard
 
 router = APIRouter(prefix="/api/v1/payments", tags=["payments"])
 
@@ -27,5 +29,15 @@ async def tbank_webhook(request: Request) -> JSONResponse:
         return JSONResponse({"ok": True})
     service: PaymentService | None = request.app.state.payment_service
     if service is not None:
-        await service.confirm_webhook(payload)
+        credited_user_id = await service.confirm_webhook(payload)
+        bot = request.app.state.telegram_bot
+        if credited_user_id is not None and bot is not None:
+            with suppress(Exception):
+                await bot.send_message(
+                    credited_user_id,
+                    PAYMENT_CONFIRMED_COPY,
+                    reply_markup=payment_confirmed_keyboard(
+                        request.app.state.settings.mini_app_url
+                    ),
+                )
     return JSONResponse({"ok": True})
