@@ -42,6 +42,10 @@ class FakeSession:
     async def execute(self, statement: object) -> None:
         del statement
 
+    async def scalar(self, statement: object) -> None:
+        del statement
+        return None
+
 
 class SessionContext:
     def __init__(self, session: FakeSession) -> None:
@@ -116,6 +120,28 @@ async def test_valid_exchange_sets_only_secure_opaque_cookie() -> None:
     assert "SameSite=lax" in cookie
     assert "Path=/api/v1" in cookie
     assert "signed-launch-canary" not in cookie
+    assert sessions.session.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_combines_session_exchange_and_safe_palette() -> None:
+    app, sessions = build_app()
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/tma/session/bootstrap",
+            headers={"Authorization": "tma signed-launch-canary"},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert f"car_wrap_session={'A' * 43}" in response.headers["set-cookie"]
+    assert response.json()["source_ready"] is False
+    assert response.json()["bot_chat_url"] == (
+        "https://t.me/CarWrapBot?start=open_app"
+    )
     assert sessions.session.commits == 1
 
 

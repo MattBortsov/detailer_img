@@ -410,32 +410,6 @@ async function fetchJson(url, options = {}) {
   return response;
 }
 
-async function exchangeSession() {
-  if (sessionExchangeAttempted || !telegram) {
-    return false;
-  }
-  sessionExchangeAttempted = true;
-  let launchEvidence =
-    typeof telegram.initData === "string" ? telegram.initData : "";
-  try {
-    const response = await fetch("/api/v1/tma/session", {
-      method: "POST",
-      credentials: "include",
-      headers: {Authorization: `tma ${launchEvidence}`},
-    });
-    if (!response.ok) {
-      state = authenticationFailed(
-        state,
-        trustedBotUrl(response.headers.get("X-Bot-Chat-Url")),
-      );
-      return false;
-    }
-    return true;
-  } finally {
-    launchEvidence = "";
-  }
-}
-
 async function fetchPalette() {
   try {
     const response = await fetchJson("/api/v1/palette-state");
@@ -586,12 +560,48 @@ async function fetchCatalog(append = false) {
 }
 
 async function bootstrap() {
-  if (!(await exchangeSession())) {
+  if (sessionExchangeAttempted || !telegram) {
     state = authenticationFailed(state, state.botChatUrl);
     render();
     return;
   }
-  await fetchPalette();
+  sessionExchangeAttempted = true;
+  let launchEvidence =
+    typeof telegram.initData === "string" ? telegram.initData : "";
+  try {
+    const response = await fetch("/api/v1/tma/session/bootstrap", {
+      method: "POST",
+      credentials: "include",
+      headers: {Authorization: `tma ${launchEvidence}`},
+    });
+    if (!response.ok) {
+      state = authenticationFailed(
+        state,
+        trustedBotUrl(response.headers.get("X-Bot-Chat-Url")),
+      );
+      return;
+    }
+    const payload = await response.json();
+    if (!validPaletteState(payload)) {
+      state = paletteFailed(state);
+      return;
+    }
+    state = loadPalette(state, {
+      choices: payload.choices,
+      sourceReady: payload.source_ready,
+      sourcePreviewUrl: payload.source_preview_url,
+      botChatUrl: payload.bot_chat_url,
+      privacyText: payload.privacy_text,
+      isAdmin: payload.is_admin,
+    });
+  } catch {
+    if (state.view !== "auth_failed") {
+      state = paletteFailed(state);
+    }
+  } finally {
+    launchEvidence = "";
+  }
+  render();
 }
 
 function findCardButton(colorId, selector) {

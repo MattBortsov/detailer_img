@@ -329,6 +329,7 @@ services:
       - /var/log/nginx:size=16m,mode=0755
     volumes:
       - ./nginx/car-wrap.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
     networks:
       - edge

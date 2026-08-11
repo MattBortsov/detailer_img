@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -22,6 +23,7 @@ from car_wrap.api.schemas import (
 )
 from car_wrap.bot.media import MediaRejection, read_snapshotted_media
 from car_wrap.bot.router import REPLACE_PHOTO_COPY, replace_photo_keyboard
+from car_wrap.config import AppSettings
 from car_wrap.db.models import ActiveSource, CustomColor, CustomColorVersion
 from car_wrap.palette import (
     PALETTE_CHOICES,
@@ -80,21 +82,16 @@ async def owner_source(
     )
 
 
-@router.get("/palette-state", response_model=PaletteStateOut)
-async def palette_state(
-    request: Request,
-    response: Response,
-    current: CurrentSession,
-    session: DatabaseSession,
+async def build_palette_state(
+    session: AsyncSession,
+    *,
+    settings: AppSettings,
+    telegram_user_id: int,
+    session_expires_at: datetime,
 ) -> PaletteStateOut:
-    if request.query_params:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid request",
-        )
-    source = await owner_source(session, current.telegram_user_id)
-    settings = request.app.state.settings
-    response.headers["Cache-Control"] = "no-store"
+    """Build the safe owner-bound palette payload for an authenticated launch."""
+
+    source = await owner_source(session, telegram_user_id)
     catalog: tuple[PaletteChoice | SurpriseChoice, ...] = (
         *PALETTE_CHOICES,
         SURPRISE_CHOICE,
@@ -109,8 +106,30 @@ async def palette_state(
         ),
         bot_chat_url=settings.bot_chat_url,
         privacy_text=PRIVACY_TEXT,
+        session_expires_at=session_expires_at,
+        is_admin=telegram_user_id in settings.admin_telegram_user_ids,
+    )
+
+
+@router.get("/palette-state", response_model=PaletteStateOut)
+async def palette_state(
+    request: Request,
+    response: Response,
+    current: CurrentSession,
+    session: DatabaseSession,
+) -> PaletteStateOut:
+    if request.query_params:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request",
+        )
+    settings = request.app.state.settings
+    response.headers["Cache-Control"] = "no-store"
+    return await build_palette_state(
+        session,
+        settings=settings,
+        telegram_user_id=current.telegram_user_id,
         session_expires_at=current.expires_at,
-        is_admin=current.telegram_user_id in settings.admin_telegram_user_ids,
     )
 
 
