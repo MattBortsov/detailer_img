@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -17,6 +19,7 @@ PAYMENT_GATEWAY_SOURCE = "car_wrap_bot"
 SIGNATURE_HEADER = "X-Payment-Signature"
 TIMESTAMP_HEADER = "X-Payment-Timestamp"
 _TIMEOUT = httpx.Timeout(connect=10.0, read=20.0, write=10.0, pool=10.0)
+_SHORT_PAYMENT_PATH = re.compile(r"/pay/[A-Za-z0-9_-]{22}")
 
 
 class PaymentActivationDenied(RuntimeError):
@@ -48,6 +51,28 @@ class GatewayCheckout:
 class GatewayRecurring:
     invoice_id: int
     status: str
+
+
+def _is_allowed_checkout_url(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme != "https"
+            or parsed.username
+            or parsed.password
+            or parsed.port
+        ):
+            return False
+    except ValueError:
+        return False
+    if parsed.hostname == "auth.robokassa.ru":
+        return parsed.path.startswith("/Merchant/")
+    return bool(
+        parsed.hostname == "seo-smith.ru"
+        and _SHORT_PAYMENT_PATH.fullmatch(parsed.path)
+        and not parsed.query
+        and not parsed.fragment
+    )
 
 
 def canonical_json(payload: dict[str, Any]) -> bytes:
@@ -158,7 +183,7 @@ class PaymentGatewayClient:
             or isinstance(invoice_id, bool)
             or invoice_id <= 0
             or not isinstance(redirect_url, str)
-            or not redirect_url.startswith("https://auth.robokassa.ru/")
+            or not _is_allowed_checkout_url(redirect_url)
         ):
             raise PaymentGatewayOutcomeAmbiguous("invalid checkout response")
         return GatewayCheckout(invoice_id=invoice_id, redirect_url=redirect_url)

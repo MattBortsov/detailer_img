@@ -24,6 +24,7 @@ from car_wrap.billing.gateway import (
     TIMESTAMP_HEADER,
     PaymentGatewayClient,
     PaymentGatewayOutcomeAmbiguous,
+    _is_allowed_checkout_url,
     canonical_json,
     message_signature,
 )
@@ -50,6 +51,20 @@ def _settings(**overrides: object) -> AppSettings:
     return AppSettings.model_validate(values)
 
 
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://auth.robokassa.ru/Merchant/Index.aspx?x=1", True),
+        ("https://seo-smith.ru/pay/AbCdEfGhIjKlMnOpQrStUv", True),
+        ("https://seo-smith.ru/pay/too-short", False),
+        ("https://seo-smith.ru.evil.test/pay/AbCdEfGhIjKlMnOpQrStUv", False),
+        ("http://seo-smith.ru/pay/AbCdEfGhIjKlMnOpQrStUv", False),
+    ],
+)
+def test_checkout_url_allowlist(url: str, expected: bool) -> None:
+    assert _is_allowed_checkout_url(url) is expected
+
+
 @pytest.mark.asyncio
 async def test_checkout_request_is_hmac_signed_and_returns_robokassa_url() -> None:
     captured: dict[str, Any] = {}
@@ -63,7 +78,7 @@ async def test_checkout_request_is_hmac_signed_and_returns_robokassa_url() -> No
             200,
             json={
                 "invoice_id": 42,
-                "redirect_url": "https://auth.robokassa.ru/Merchant/Index.aspx?x=1",
+                "redirect_url": "https://seo-smith.ru/pay/AbCdEfGhIjKlMnOpQrStUv",
             },
         )
 
