@@ -131,7 +131,6 @@ class TBankClient:
             and self._settings.tbank_notification_url
             and self._settings.tbank_success_url
             and self._settings.tbank_fail_url
-            and phase1_payment_report_passes(self._settings.payments_phase1_report_path)
         )
 
     @property
