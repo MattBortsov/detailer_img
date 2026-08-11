@@ -90,7 +90,7 @@ jobs:
           ssh-keygen -y -f "$HOME/.ssh/detailer_img" >/dev/null
           [[ -s "$HOME/.ssh/known_hosts" ]]
 
-      - name: Deploy exact tested revision
+      - name: Deploy exact CI-validated revision
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -116,7 +116,7 @@ jobs:
           git fetch --prune origin main
           actual_sha=$(git rev-parse origin/main)
           [[ "$actual_sha" == "$expected_sha" ]] || {
-            echo "origin/main does not match the revision that passed CI"
+            echo "origin/main does not match the revision validated by CI"
             exit 1
           }
 

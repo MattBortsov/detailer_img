@@ -32,6 +32,7 @@ export function createAppState() {
     actionEnabled: false,
     announcement: "",
     botChatUrl: null,
+    billingChatUrl: null,
     sourcePreviewUrl: null,
     privacyText: "",
     isAdmin: false,
@@ -74,6 +75,7 @@ export function loadPalette(
     actionEnabled: false,
     announcement: "",
     botChatUrl,
+    billingChatUrl: null,
     sourcePreviewUrl,
     privacyText,
     isAdmin,
@@ -296,6 +298,18 @@ export function completeSubmission(state, outcome, botChatUrl = null) {
         outcome === "active_limit"
           ? "Дождитесь результата текущего запроса и попробуйте снова."
           : "Слишком много запросов за короткое время. Попробуйте позже.",
+    });
+  }
+  if (outcome === "allowance_required") {
+    return freezeState({
+      ...state,
+      view: "allowance_required",
+      inFlight: false,
+      actionEnabled: true,
+      announcement: "",
+      billingChatUrl: botChatUrl,
+      submissionError:
+        "Бесплатная генерация уже использована. Выберите тариф, чтобы продолжить.",
     });
   }
   const isSurprise = state.selectedId === state.surprise?.color_id;

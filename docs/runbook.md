@@ -100,7 +100,7 @@ CD records the prior Git revision. If build/start/health fails,
 `ops/deploy.sh` resets source to that exact revision and rebuilds the previous
 application image. It never rolls database data back automatically.
 
-Manual rollback requires a known CI-passed full SHA:
+Manual rollback requires a known CI-validated full SHA:
 
 ```bash
 cd /root/detailer_img

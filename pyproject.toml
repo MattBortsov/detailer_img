@@ -26,22 +26,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "mypy==2.3.0",
-  "pytest==9.1.1",
-  "pytest-asyncio==1.4.0",
   "ruff==0.16.0",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.pytest.ini_options]
-addopts = "-ra"
-pythonpath = ["src"]
-testpaths = ["tests"]
-asyncio_default_fixture_loop_scope = "function"
-markers = [
-  "postgresql: requires an isolated PostgreSQL test database",
-]
 
 [tool.ruff]
 target-version = "py313"
@@ -51,11 +40,8 @@ line-length = 88
 select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101"]
 "src/car_wrap/bot/router.py" = ["RUF001"]
 "src/car_wrap/bot/delivery.py" = ["RUF001"]
-"tests/bot/test_delivery.py" = ["RUF001"]
-"tests/bot/test_router.py" = ["RUF001"]
 
 [tool.mypy]
 python_version = "3.13"

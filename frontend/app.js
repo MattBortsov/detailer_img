@@ -39,6 +39,7 @@ const elements = {
   closeSourcePhoto: document.querySelector("#close-source-photo"),
   replaceSourcePhoto: document.querySelector("#replace-source-photo"),
   closeMiniApp: document.querySelector("#close-mini-app"),
+  openBilling: document.querySelector("#open-billing"),
   form: document.querySelector("#palette-form"),
   colorsGrid: document.querySelector("#colors-grid"),
   userColorsGrid: document.querySelector("#user-colors-grid"),
@@ -371,7 +372,9 @@ function render() {
     "selection_stale",
     "submit_failed",
     "submission_limited",
+    "allowance_required",
   ].includes(state.view);
+  elements.openBilling.hidden = state.view !== "allowance_required";
   elements.alert.textContent =
     state.view === "selection_stale"
       ? "Этот цвет больше недоступен. Выберите другой."
@@ -896,9 +899,10 @@ async function submitSelectedChoice() {
         response.headers.get("X-Billing-Chat-Url"),
       );
       if (billingUrl) {
-        openTelegramUrl(billingUrl);
+        state = completeSubmission(state, "allowance_required", billingUrl);
+      } else {
+        state = completeSubmission(state, "failed");
       }
-      state = completeSubmission(state, "failed");
     } else if (response.status === 409 || response.status === 429) {
       const payload = await response.json();
       const code =
@@ -983,6 +987,9 @@ elements.retry.addEventListener("click", fetchPalette);
 for (const button of document.querySelectorAll("[data-open-chat]")) {
   button.addEventListener("click", openChat);
 }
+elements.openBilling.addEventListener("click", () => {
+  openTelegramUrl(trustedBotUrl(state.billingChatUrl));
+});
 elements.closeMiniApp.addEventListener("click", () => telegram?.close());
 
 if (telegram) {

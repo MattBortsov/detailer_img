@@ -1,1 +1,0 @@
-"""Custom color test package."""

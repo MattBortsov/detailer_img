@@ -20,9 +20,9 @@ Application settings are not GitHub secrets. They remain only in
 - Mini App: `https://89-167-101-93.sslip.io`
 - Compose project: `detailer-img`
 
-CI validates tests, formatting, typing, Compose, the application image and
-high-severity runtime vulnerabilities. CD deploys only the exact `main` commit
-that completed CI successfully. `ops/deploy.sh` validates the server, builds,
+CI validates Compose, the application image and high-severity runtime
+vulnerabilities. CD deploys only the exact `main` commit that completed CI
+successfully. `ops/deploy.sh` validates the server, builds,
 migrates once, waits for health, checks singleton counts and probes HTTPS.
 After checking out that revision, CD removes untracked source files inside the
 repository; `.env` remains because it is intentionally ignored by Git.

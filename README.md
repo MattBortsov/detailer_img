@@ -46,15 +46,3 @@ The current Hetzner host has 3.7 GiB RAM and no swap. ClamAV documents a
 configuration disables concurrent database reload and database load-testing
 to reduce peaks, but swap or a larger server is required before treating this
 host as production-safe.
-
-## Tests
-
-Python 3.13 is required. The PostgreSQL integration suite additionally needs a
-test-only database URL whose database name contains `test`:
-
-```bash
-CAR_WRAP_TEST_DATABASE_URL=postgresql+psycopg://... \
-  python3.13 -m pytest -q
-python3.13 -m ruff check src tests
-python3.13 -m mypy --strict src
-```
