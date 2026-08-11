@@ -7,6 +7,7 @@ import logging
 
 import httpx
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramAPIError
 from aiogram.types import BotCommand
 
 from car_wrap.billing.gateway import PaymentGatewayClient
@@ -19,6 +20,19 @@ from car_wrap.custom_colors.runtime import build_custom_color_service
 from car_wrap.db.session import create_session_factory
 from car_wrap.jobs.repository import JobRepository
 from car_wrap.jobs.service import JobAcceptanceService
+
+logger = logging.getLogger(__name__)
+
+
+async def set_bot_commands_best_effort(bot: Bot) -> None:
+    """Do not block polling when Telegram cannot update the command menu."""
+
+    try:
+        await bot.set_my_commands(
+            [BotCommand(command="billing", description="Оплата и подписка")]
+        )
+    except TelegramAPIError as exc:
+        logger.warning("Could not update Telegram bot commands: %s", type(exc).__name__)
 
 
 async def run_polling(settings: AppSettings) -> None:
@@ -52,9 +66,7 @@ async def run_polling(settings: AppSettings) -> None:
             payment_service=payments,
         )
     )
-    await bot.set_my_commands(
-        [BotCommand(command="billing", description="Оплата и подписка")]
-    )
+    await set_bot_commands_best_effort(bot)
     subscription_stop, subscription_task = start_subscription_scanner(
         subscriptions,
         bot,
