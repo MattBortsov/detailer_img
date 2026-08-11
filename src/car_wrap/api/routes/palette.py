@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from car_wrap.api.dependencies import (
@@ -168,9 +168,19 @@ async def active_source_image(
             settings=request.app.state.settings,
         )
     except MediaRejection:
+        # Telegram file_ids belong to the bot that received them. If a bot is
+        # replaced, its old file_ids cannot be downloaded by the new bot and
+        # must no longer make the Mini App claim that a photo is ready.
+        await session.execute(
+            delete(ActiveSource).where(
+                ActiveSource.telegram_user_id == current.telegram_user_id,
+                ActiveSource.telegram_file_id == source.telegram_file_id,
+            )
+        )
+        await session.commit()
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Active source is unavailable",
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Send the photo to the bot again",
         ) from None
     response = Response(
         content=downloaded.data,

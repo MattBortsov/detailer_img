@@ -423,7 +423,7 @@ async def _create_checkout_url(
     user_id: int,
     product_id: str,
 ) -> str | None:
-    """Issue a one-off checkout link for a direct-payment button."""
+    """Issue a one-off checkout link after an explicit product action."""
 
     if payment_service is None or not payment_service.production_available():
         return None
@@ -467,21 +467,14 @@ async def send_paywall(
         if payment_service is not None
         else False
     )
-    intro_checkout_url = (
-        await _create_checkout_url(
-            payment_service=payment_service,
-            user_id=user_id,
-            product_id="intro_25",
-        )
-        if intro_available and not has_intro_recurring_source
-        else None
-    )
     await bot.send_message(
         chat_id,
         "Выберите вариант:",
         reply_markup=paywall_keyboard(
             intro_available=intro_available,
-            intro_checkout_url=intro_checkout_url,
+            # Creating an order while merely rendering the paywall reserves an
+            # intro slot. Create it only after the user presses the product.
+            intro_checkout_url=None,
         ),
     )
     if subscription is not None:
