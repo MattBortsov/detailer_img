@@ -79,6 +79,7 @@ def test_nginx_is_tls_only_and_forwards_trusted_scheme() -> None:
     assert "listen 443 ssl;" in config
     assert "listen 80" not in config
     assert "proxy_pass http://api:8000;" in config
+    assert "location /health/" in config
     assert "proxy_set_header X-Forwarded-Proto https;" in config
     assert "client_max_body_size 9m;" in config
     assert "$request_method $uri $server_protocol" in config
