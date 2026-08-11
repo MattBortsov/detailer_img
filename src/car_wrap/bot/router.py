@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -325,27 +325,25 @@ def intro_recurring_cancel_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def package_keyboard() -> InlineKeyboardMarkup:
+def package_keyboard(
+    checkout_urls: Mapping[str, str] | None = None,
+) -> InlineKeyboardMarkup:
+    urls = checkout_urls or {}
+
+    def package_button(product_id: str, text: str) -> InlineKeyboardButton:
+        checkout_url = urls.get(product_id)
+        if checkout_url is not None:
+            return InlineKeyboardButton(text=text, url=checkout_url)
+        return InlineKeyboardButton(
+            text=text,
+            callback_data=f"{BILLING_PRODUCT_PREFIX}{product_id}",
+        )
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="📦 5 генераций — 149 ₽",
-                    callback_data=f"{BILLING_PRODUCT_PREFIX}pack_5",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="📦 15 генераций — 349 ₽",
-                    callback_data=f"{BILLING_PRODUCT_PREFIX}pack_15",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="📦 40 генераций — 749 ₽",
-                    callback_data=f"{BILLING_PRODUCT_PREFIX}pack_40",
-                )
-            ],
+            [package_button("pack_5", "📦 5 генераций — 149 ₽")],
+            [package_button("pack_15", "📦 15 генераций — 349 ₽")],
+            [package_button("pack_40", "📦 40 генераций — 749 ₽")],
             [
                 InlineKeyboardButton(
                     text="← Назад", callback_data=BILLING_BACK_CALLBACK_DATA
@@ -419,26 +417,27 @@ async def handle_paywall_callback(
     )
 
 
-async def _create_intro_checkout_url(
+async def _create_checkout_url(
     *,
     payment_service: PaymentProcessor | None,
     user_id: int,
+    product_id: str,
 ) -> str | None:
-    """Issue the one-off checkout link used directly by the intro offer button."""
+    """Issue a one-off checkout link for a direct-payment button."""
 
     if payment_service is None or not payment_service.production_available():
         return None
     try:
         _order, url = await payment_service.start_checkout(
             user_id=user_id,
-            product_id="intro_25",
+            product_id=product_id,
             idempotency_key=uuid4().hex,
         )
     except PaymentActivationDenied:
-        logger.warning("intro checkout blocked by production gate")
+        logger.warning("direct checkout blocked by production gate")
         return None
     except Exception:
-        logger.exception("failed to create direct intro checkout")
+        logger.exception("failed to create direct checkout")
         return None
     return url
 
@@ -469,9 +468,10 @@ async def send_paywall(
         else False
     )
     intro_checkout_url = (
-        await _create_intro_checkout_url(
+        await _create_checkout_url(
             payment_service=payment_service,
             user_id=user_id,
+            product_id="intro_25",
         )
         if intro_available and not has_intro_recurring_source
         else None
@@ -531,7 +531,23 @@ async def handle_billing_navigation(
     if user_id is None or callback.message is None:
         return
     if screen == "packages":
-        text, keyboard = "Пакеты генераций:", package_keyboard()
+        product_ids = ("pack_5", "pack_15", "pack_40")
+        urls = await asyncio.gather(
+            *(
+                _create_checkout_url(
+                    payment_service=payment_service,
+                    user_id=user_id,
+                    product_id=product_id,
+                )
+                for product_id in product_ids
+            )
+        )
+        checkout_urls = {
+            product_id: url
+            for product_id, url in zip(product_ids, urls, strict=True)
+            if url is not None
+        }
+        text, keyboard = "Пакеты генераций:", package_keyboard(checkout_urls)
     elif screen == "monthly":
         text, keyboard = "Месячные планы:", monthly_keyboard()
     else:
@@ -543,9 +559,10 @@ async def handle_billing_navigation(
             else False
         )
         intro_checkout_url = (
-            await _create_intro_checkout_url(
+            await _create_checkout_url(
                 payment_service=payment_service,
                 user_id=user_id,
+                product_id="intro_25",
             )
             if intro_available and not has_intro_recurring_source
             else None
