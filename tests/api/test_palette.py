@@ -150,7 +150,7 @@ async def test_palette_state_exposes_only_safe_ordered_owner_state() -> None:
     assert payload["source_ready"] is True
     assert payload["source_message_id"] == 77
     assert payload["source_preview_url"] == "/api/v1/active-source/image"
-    assert payload["bot_chat_url"] == "https://t.me/CarWrapBot"
+    assert payload["bot_chat_url"] == "https://t.me/CarWrapBot?start=open_app"
     assert payload["is_admin"] is False
     assert payload["privacy_text"] == (
         "Приложение не сохраняет файлы изображений. Telegram и AI-провайдер "
@@ -265,7 +265,7 @@ async def test_replacement_request_prompts_same_owner_with_cancel() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "prompt_sent",
-        "bot_chat_url": "https://t.me/CarWrapBot",
+        "bot_chat_url": "https://t.me/CarWrapBot?start=open_app",
     }
     assert telegram.sent[0]["chat_id"] == 1001
     assert telegram.sent[0]["text"] == "Пришлите новое фото"

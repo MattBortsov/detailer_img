@@ -22,7 +22,19 @@ curl --fail --silent https://89-167-101-93.sslip.io/health/ready
 Use scoped recent logs; never run commands that print container environments:
 
 ```bash
-docker compose logs --since 30m --tail 200 api bot relay worker
+docker compose logs --since 30m --tail 200 api bot daily-stats relay worker
+```
+
+## Daily administrator statistics
+
+The `daily-stats` service sends each configured `ADMIN_TELEGRAM_USER_IDS`
+one report for the preceding UTC calendar day. By default it is sent after
+09:00 UTC; set `DAILY_STATS_HOUR_UTC` in `.env` to change the hour. Delivery
+is recorded in PostgreSQL per administrator, so a normal service restart does
+not resend an already confirmed report.
+
+```bash
+docker compose logs --since 26h --tail 100 daily-stats
 ```
 
 ## Backup and isolated restore

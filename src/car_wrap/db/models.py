@@ -91,6 +91,41 @@ class ActiveSource(Base):
     )
 
 
+class TelegramUser(Base):
+    """One durable, privacy-minimal record for each private bot user."""
+
+    __tablename__ = "telegram_users"
+    __table_args__ = (
+        CheckConstraint("telegram_user_id > 0", name="telegram_user_id_positive"),
+        CheckConstraint("last_seen_at >= first_seen_at", name="seen_order"),
+    )
+
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class DailyStatsDelivery(Base):
+    """A successfully delivered administrator report, keyed by UTC date."""
+
+    __tablename__ = "daily_stats_deliveries"
+    __table_args__ = (
+        CheckConstraint("telegram_user_id > 0", name="telegram_user_id_positive"),
+    )
+
+    report_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), primary_key=True
+    )
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class MiniAppSession(Base):
     """One-time authenticated Telegram launch and its opaque session."""
 
@@ -786,4 +821,359 @@ class AdminAuditEvent(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    )
+
+
+class BillingOrder(Base):
+    """Server-created commercial intent with a catalog-resolved RUB amount."""
+
+    __tablename__ = "billing_orders"
+    __table_args__ = (
+        UniqueConstraint("telegram_user_id", "idempotency_key"),
+        Index(
+            "uq_billing_orders_active_intro_number",
+            "telegram_user_id",
+            "intro_number",
+            unique=True,
+            postgresql_where=text(
+                "product_id = 'intro_25' AND status IN ('pending', 'confirmed')"
+            ),
+        ),
+        UniqueConstraint("subscription_id", "renewal_period_start"),
+        CheckConstraint("telegram_user_id > 0", name="telegram_user_id_positive"),
+        CheckConstraint(
+            "product_id IN ('intro_25', 'pack_5', 'pack_15', 'pack_40', "
+            "'plus', 'studio')",
+            name="product_supported",
+        ),
+        CheckConstraint("amount_kopecks > 0", name="amount_kopecks_positive"),
+        CheckConstraint("currency = 'RUB'", name="currency_rub"),
+        CheckConstraint(
+            "status IN ('pending', 'confirmed', 'cancelled', 'failed')",
+            name="status_supported",
+        ),
+        CheckConstraint(
+            "(product_id = 'intro_25' AND intro_number BETWEEN 1 AND 3) OR "
+            "(product_id <> 'intro_25' AND intro_number IS NULL)",
+            name="intro_number_matches_product",
+        ),
+        CheckConstraint(
+            "char_length(idempotency_key) BETWEEN 1 AND 64",
+            name="idempotency_key_length",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    telegram_user_id: Mapped[int] = mapped_column(
+        ForeignKey("telegram_users.telegram_user_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    product_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    amount_kopecks: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    intro_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="RUB", server_default="RUB"
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    subscription_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("subscriptions.id", ondelete="RESTRICT"), nullable=True
+    )
+    renewal_period_start: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    recurring_consent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class TBankPayment(Base):
+    """Bounded T-Bank status metadata; no signed request or card data is stored."""
+
+    __tablename__ = "tbank_payments"
+    __table_args__ = (
+        UniqueConstraint("order_id"),
+        UniqueConstraint("provider_payment_id"),
+        UniqueConstraint("provider_order_id"),
+        CheckConstraint(
+            "status IN ('initializing', 'ambiguous', 'new', 'authorized', "
+            "'confirmed', 'rejected', 'cancelled')",
+            name="status_supported",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    order_id: Mapped[UUID] = mapped_column(
+        ForeignKey("billing_orders.id", ondelete="RESTRICT"), nullable=False
+    )
+    # Init's PaymentId does not exist until after the external request.  The
+    # provider OrderId is therefore the durable correlation key persisted
+    # before crossing the network boundary.
+    provider_payment_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    provider_order_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class Subscription(Base):
+    """Period-bound recurring-plan metadata and idempotent period key."""
+
+    __tablename__ = "subscriptions"
+    __table_args__ = (
+        UniqueConstraint("telegram_user_id", "product_id", "billing_period_start"),
+        CheckConstraint("telegram_user_id > 0", name="telegram_user_id_positive"),
+        CheckConstraint("product_id IN ('plus', 'studio')", name="product_supported"),
+        CheckConstraint(
+            "status IN ('active', 'cancelled', 'past_due', 'expired')",
+            name="status_supported",
+        ),
+        CheckConstraint(
+            "billing_period_end > billing_period_start", name="billing_period_order"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    telegram_user_id: Mapped[int] = mapped_column(
+        ForeignKey("telegram_users.telegram_user_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    product_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    provider_rebill_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, unique=True
+    )
+    billing_period_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    billing_period_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    auto_renew_consent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    consent_amount_kopecks: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
+    consent_period_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    renewal_failure_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    renewal_attempted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class UltimaLead(Base):
+    """Auditable interest in bespoke Ultima pricing; never a payment intent."""
+
+    __tablename__ = "ultima_leads"
+    __table_args__ = (
+        UniqueConstraint("telegram_user_id", "created_at"),
+        CheckConstraint("telegram_user_id > 0", name="telegram_user_id_positive"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    telegram_user_id: Mapped[int] = mapped_column(
+        ForeignKey("telegram_users.telegram_user_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class AllowanceBalance(Base):
+    """A separate durable counter bucket for each allowance category."""
+
+    __tablename__ = "allowance_balances"
+    __table_args__ = (
+        UniqueConstraint("telegram_user_id", "allowance_kind", "subscription_id"),
+        Index(
+            "uq_allowance_balances_nonmonthly_kind",
+            "telegram_user_id",
+            "allowance_kind",
+            unique=True,
+            postgresql_where=text("subscription_id IS NULL"),
+        ),
+        CheckConstraint("telegram_user_id > 0", name="telegram_user_id_positive"),
+        CheckConstraint(
+            "allowance_kind IN ('free', 'intro', 'package', 'bonus', 'monthly')",
+            name="allowance_kind_supported",
+        ),
+        CheckConstraint(
+            "granted_count >= 0 AND reserved_count >= 0 AND consumed_count >= 0",
+            name="counts_nonnegative",
+        ),
+        CheckConstraint(
+            "reserved_count + consumed_count <= granted_count",
+            name="counts_within_grant",
+        ),
+        CheckConstraint(
+            "(allowance_kind = 'monthly') = (subscription_id IS NOT NULL)",
+            name="monthly_requires_subscription",
+        ),
+        CheckConstraint(
+            "expires_at IS NULL OR allowance_kind = 'monthly'",
+            name="expiry_monthly_only",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    telegram_user_id: Mapped[int] = mapped_column(
+        ForeignKey("telegram_users.telegram_user_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    allowance_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    subscription_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("subscriptions.id", ondelete="RESTRICT"), nullable=True
+    )
+    granted_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    reserved_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    consumed_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class AllowanceReservation(Base):
+    """One job-bound reservation that later consumes or releases allowance."""
+
+    __tablename__ = "allowance_reservations"
+    __table_args__ = (
+        UniqueConstraint("job_id"),
+        CheckConstraint("quantity = 1", name="single_generation_only"),
+        CheckConstraint(
+            "status IN ('reserved', 'consumed', 'released')", name="status_supported"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    balance_id: Mapped[UUID] = mapped_column(
+        ForeignKey("allowance_balances.id", ondelete="RESTRICT"), nullable=False
+    )
+    job_id: Mapped[UUID] = mapped_column(
+        ForeignKey("generation_jobs.id", ondelete="RESTRICT"), nullable=False
+    )
+    quantity: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="reserved", server_default="reserved"
+    )
+    reserved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    terminal_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class BillingLedgerEntry(Base):
+    """Append-only scalar evidence for every entitlement balance mutation."""
+
+    __tablename__ = "billing_ledger_entries"
+    __table_args__ = (
+        UniqueConstraint("telegram_user_id", "idempotency_key"),
+        Index(
+            "uq_billing_ledger_one_free_grant",
+            "telegram_user_id",
+            unique=True,
+            postgresql_where=text("allowance_kind = 'free' AND entry_kind = 'grant'"),
+        ),
+        Index(
+            "uq_billing_ledger_one_bonus_grant",
+            "telegram_user_id",
+            unique=True,
+            postgresql_where=text("allowance_kind = 'bonus' AND entry_kind = 'grant'"),
+        ),
+        CheckConstraint("telegram_user_id > 0", name="telegram_user_id_positive"),
+        CheckConstraint(
+            "allowance_kind IN ('free', 'intro', 'package', 'bonus', 'monthly')",
+            name="allowance_kind_supported",
+        ),
+        CheckConstraint(
+            "entry_kind IN ('grant', 'reserve', 'consume', 'release', 'expire')",
+            name="entry_kind_supported",
+        ),
+        CheckConstraint("delta_count <> 0", name="delta_nonzero"),
+        CheckConstraint(
+            "(allowance_kind <> 'free' OR entry_kind <> 'grant' OR "
+            "delta_count = 1) AND (allowance_kind <> 'bonus' OR "
+            "entry_kind <> 'grant' OR delta_count = 2)",
+            name="free_and_bonus_grant_sizes",
+        ),
+        CheckConstraint(
+            "char_length(idempotency_key) BETWEEN 1 AND 64",
+            name="idempotency_key_length",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    telegram_user_id: Mapped[int] = mapped_column(
+        ForeignKey("telegram_users.telegram_user_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    balance_id: Mapped[UUID] = mapped_column(
+        ForeignKey("allowance_balances.id", ondelete="RESTRICT"), nullable=False
+    )
+    order_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("billing_orders.id", ondelete="RESTRICT"), nullable=True
+    )
+    reservation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("allowance_reservations.id", ondelete="RESTRICT"), nullable=True
+    )
+    job_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("generation_jobs.id", ondelete="RESTRICT"), nullable=True
+    )
+    allowance_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    entry_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    delta_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
     )

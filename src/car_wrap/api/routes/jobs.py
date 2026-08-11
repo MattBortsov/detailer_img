@@ -39,6 +39,10 @@ _ERRORS: dict[AcceptanceErrorCode, tuple[int, str]] = {
         status.HTTP_429_TOO_MANY_REQUESTS,
         "Слишком много запросов за короткое время. Попробуйте позже.",
     ),
+    AcceptanceErrorCode.ALLOWANCE_REQUIRED: (
+        status.HTTP_402_PAYMENT_REQUIRED,
+        "Для новой генерации выберите подходящий тариф.",
+    ),
 }
 
 
@@ -74,9 +78,15 @@ async def accept_job(
         )
     except JobAcceptanceError as error:
         status_code, message = _ERRORS[error.code]
+        headers = (
+            {"X-Billing-Chat-Url": request.app.state.settings.billing_chat_url}
+            if error.code is AcceptanceErrorCode.ALLOWANCE_REQUIRED
+            else None
+        )
         raise HTTPException(
             status_code=status_code,
             detail={"code": error.code.value, "message": message},
+            headers=headers,
         ) from None
     response.headers["Cache-Control"] = "no-store"
     settings = request.app.state.settings
@@ -84,5 +94,5 @@ async def accept_job(
         job_id=accepted.job_id,
         status="queued",
         accepted=True,
-        bot_chat_url=f"https://t.me/{settings.bot_username}",
+        bot_chat_url=settings.bot_chat_url,
     )

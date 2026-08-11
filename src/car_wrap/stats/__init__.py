@@ -1,0 +1,1 @@
+"""Administrator statistics delivery process."""

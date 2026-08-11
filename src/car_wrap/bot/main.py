@@ -7,6 +7,10 @@ import asyncio
 import httpx
 from aiogram import Bot, Dispatcher
 
+from car_wrap.billing.payments import PaymentService
+from car_wrap.billing.runtime import start_subscription_scanner
+from car_wrap.billing.subscriptions import SubscriptionService
+from car_wrap.billing.tbank import TBankClient
 from car_wrap.bot.router import create_router
 from car_wrap.config import AppSettings
 from car_wrap.custom_colors.runtime import build_custom_color_service
@@ -35,17 +39,31 @@ async def run_polling(settings: AppSettings) -> None:
         window_seconds=settings.job_limit_window_seconds,
     )
     dispatcher = Dispatcher()
+    payments = PaymentService(sessions, TBankClient(settings))
+    subscriptions = SubscriptionService(sessions, payments)
     dispatcher.include_router(
         create_router(
             settings=settings,
             session_factory=sessions,
             custom_color_service=custom_colors,
             job_acceptance_service=job_service,
+            payment_service=payments,
         )
+    )
+    subscription_stop, subscription_task = start_subscription_scanner(
+        subscriptions,
+        bot,
+        interval_seconds=settings.subscription_scan_seconds,
     )
     try:
         await dispatcher.start_polling(bot)
     finally:
+        subscription_stop.set()
+        subscription_task.cancel()
+        try:
+            await subscription_task
+        except asyncio.CancelledError:
+            pass
         await bot.session.close()
         await provider_client.aclose()
         await engine.dispose()

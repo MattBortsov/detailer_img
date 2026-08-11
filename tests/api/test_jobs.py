@@ -95,7 +95,7 @@ async def test_jobs_returns_strict_202_projection() -> None:
         "job_id": str(JOB_ID),
         "status": "queued",
         "accepted": True,
-        "bot_chat_url": "https://t.me/CarWrapBot",
+        "bot_chat_url": "https://t.me/CarWrapBot?start=open_app",
     }
     assert service.calls == [(1001, "charcoal", UUID(SUBMISSION_ID))]
 
@@ -126,6 +126,26 @@ async def test_jobs_maps_only_stable_sanitized_errors(
     assert response.json()["detail"]["code"] == error.value
     for forbidden in ("token", "redis", "postgres", "file_id", "openrouter"):
         assert forbidden not in response.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_allowance_required_routes_the_mini_app_to_the_bot_paywall() -> None:
+    async with AsyncClient(
+        transport=ASGITransport(
+            app=app(FakeService(AcceptanceErrorCode.ALLOWANCE_REQUIRED))
+        ),
+        base_url="https://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/jobs",
+            json={"color_id": "charcoal", "client_submission_uuid": SUBMISSION_ID},
+        )
+
+    assert response.status_code == 402
+    assert response.json()["detail"]["code"] == "allowance_required"
+    assert response.headers["X-Billing-Chat-Url"] == (
+        "https://t.me/CarWrapBot?start=billing"
+    )
 
 
 @pytest.mark.asyncio

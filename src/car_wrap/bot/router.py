@@ -6,10 +6,11 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from aiogram import Bot, F, Router
+from aiogram import BaseMiddleware, Bot, F, Router
 from aiogram.enums import ChatType
 from aiogram.filters import CommandObject, CommandStart
 from aiogram.types import (
@@ -20,8 +21,13 @@ from aiogram.types import (
     Message,
     WebAppInfo,
 )
+from aiogram.types.base import TelegramObject
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from car_wrap.billing.catalog import get_product
+from car_wrap.billing.contracts import ProductKind
+from car_wrap.billing.repository import BillingRepository
 from car_wrap.bot.delivery import MENU_CALLBACK_DATA
 from car_wrap.bot.media import (
     MediaRejection,
@@ -30,11 +36,13 @@ from car_wrap.bot.media import (
     read_supported_media_bytes,
 )
 from car_wrap.config import AppSettings
+from car_wrap.db.models import Subscription, UltimaLead
 from car_wrap.palette import custom_selection_id
 from car_wrap.services.active_source import (
     ActiveSourceDecision,
     set_active_source,
 )
+from car_wrap.services.telegram_users import record_telegram_user
 
 NO_SOURCE_COPY = (
     "Отправьте фото автомобиля или мотоцикла. Лучше всего подойдёт чёткий "
@@ -46,6 +54,7 @@ UNSUPPORTED_MESSAGE_COPY = (
 WINNING_SOURCE_COPY = "Теперь выберите цвет."
 OLDER_SOURCE_COPY = "Фото принято, но для оклейки уже выбрано более новое фото."
 MENU_COPY = "Отправьте новое фото или выберите другой цвет для текущего."
+OPEN_APP_COPY = "Откройте приложение кнопкой ниже."
 REPLACE_PHOTO_COPY = "Пришлите новое фото"
 REPLACE_PHOTO_CANCEL_CALLBACK_DATA = "replace_photo:cancel"
 CUSTOM_COLOR_REQUEST_CALLBACK_DATA = "custom_color:request"
@@ -74,6 +83,50 @@ CUSTOM_COLOR_FAILED_COPY = "Не удалось обработать образ�
 ActiveSourceSetter = Callable[..., Awaitable[ActiveSourceDecision]]
 CustomColorCreator = Any
 JobAcceptor = Any
+PaymentProcessor = Any
+
+PAYWALL_CALLBACK_DATA = "billing:open"
+PACKAGES_CALLBACK_DATA = "billing:packages"
+MONTHLY_CALLBACK_DATA = "billing:monthly"
+BILLING_BACK_CALLBACK_DATA = "billing:back"
+ULTIMA_CALLBACK_DATA = "billing:ultima"
+BILLING_PRODUCT_PREFIX = "billing:product:"
+BILLING_CONSENT_PREFIX = "billing:consent:"
+BILLING_CANCEL_CALLBACK_DATA = "billing:cancel"
+ULTIMA_COPY = (
+    "Свяжитесь с менеджером, чтобы узнать стоимость конкретно для вашего бизнеса."
+)
+PAYMENTS_UNAVAILABLE_COPY = "Оплата сейчас недоступна. Попробуйте позже."
+
+
+class UserTrackingMiddleware(BaseMiddleware):
+    """Persist only an authenticated private user's Telegram ID and activity."""
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._session_factory = session_factory
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        user_id: int | None = None
+        if isinstance(event, Message) and _trusted_private_message(event):
+            user_id = event.from_user.id if event.from_user is not None else None
+        elif isinstance(event, CallbackQuery):
+            message = event.message
+            if (
+                message is not None
+                and message.chat.type == ChatType.PRIVATE
+                and message.chat.id == event.from_user.id
+            ):
+                user_id = event.from_user.id
+        if user_id is not None:
+            async with self._session_factory() as session:
+                await record_telegram_user(session, user_id)
+                await session.commit()
+        return await handler(event, data)
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +222,343 @@ def replace_photo_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def paywall_keyboard(*, intro_available: bool) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if intro_available:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="1 генерация — 25 ₽",
+                    callback_data=f"{BILLING_PRODUCT_PREFIX}intro_25",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(text="Пакеты", callback_data=PACKAGES_CALLBACK_DATA),
+            InlineKeyboardButton(text="Месяц", callback_data=MONTHLY_CALLBACK_DATA),
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def subscription_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Отключить автопродление",
+                    callback_data=BILLING_CANCEL_CALLBACK_DATA,
+                )
+            ]
+        ]
+    )
+
+
+def package_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="5 генераций — 149 ₽",
+                    callback_data=f"{BILLING_PRODUCT_PREFIX}pack_5",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="15 генераций — 349 ₽",
+                    callback_data=f"{BILLING_PRODUCT_PREFIX}pack_15",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="40 генераций — 749 ₽",
+                    callback_data=f"{BILLING_PRODUCT_PREFIX}pack_40",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Назад", callback_data=BILLING_BACK_CALLBACK_DATA
+                )
+            ],
+        ]
+    )
+
+
+def monthly_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Plus: 30 генераций — 499 ₽/месяц",
+                    callback_data=f"{BILLING_PRODUCT_PREFIX}plus",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Studio: 100 генераций — 1 499 ₽/месяц",
+                    callback_data=f"{BILLING_PRODUCT_PREFIX}studio",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Ultima — Узнать цену", callback_data=ULTIMA_CALLBACK_DATA
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Назад", callback_data=BILLING_BACK_CALLBACK_DATA
+                )
+            ],
+        ]
+    )
+
+
+def _trusted_callback(callback: CallbackQuery) -> int | None:
+    message = callback.message
+    if (
+        message is None
+        or message.chat.type != ChatType.PRIVATE
+        or message.chat.id != callback.from_user.id
+    ):
+        return None
+    return callback.from_user.id
+
+
+async def _intro_available(session: AsyncSession, user_id: int) -> bool:
+    return await BillingRepository().intro_offer_available(session, user_id=user_id)
+
+
+async def handle_paywall_callback(
+    callback: CallbackQuery,
+    *,
+    bot: Bot,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await bot.answer_callback_query(callback.id)
+    user_id = _trusted_callback(callback)
+    if user_id is None or callback.message is None:
+        return
+    await send_paywall(
+        bot,
+        chat_id=callback.message.chat.id,
+        user_id=user_id,
+        session_factory=session_factory,
+    )
+
+
+async def send_paywall(
+    bot: Bot,
+    *,
+    chat_id: int,
+    user_id: int,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Render the only authenticated entry to product navigation and renewal control."""
+
+    async with session_factory() as session:
+        intro_available = await _intro_available(session, user_id)
+        subscription = await session.scalar(
+            select(Subscription.id)
+            .where(
+                Subscription.telegram_user_id == user_id,
+                Subscription.status == "active",
+            )
+            .limit(1)
+        )
+    await bot.send_message(
+        chat_id,
+        "Выберите вариант:",
+        reply_markup=paywall_keyboard(intro_available=intro_available),
+    )
+    if subscription is not None:
+        await bot.send_message(
+            chat_id,
+            "Автопродление подписки активно.",
+            reply_markup=subscription_cancel_keyboard(),
+        )
+
+
+async def handle_billing_navigation(
+    callback: CallbackQuery,
+    *,
+    bot: Bot,
+    session_factory: async_sessionmaker[AsyncSession],
+    screen: str,
+) -> None:
+    await bot.answer_callback_query(callback.id)
+    user_id = _trusted_callback(callback)
+    if user_id is None or callback.message is None:
+        return
+    if screen == "packages":
+        text, keyboard = "Пакеты генераций:", package_keyboard()
+    elif screen == "monthly":
+        text, keyboard = "Месячные планы:", monthly_keyboard()
+    else:
+        async with session_factory() as session:
+            intro_available = await _intro_available(session, user_id)
+        text, keyboard = (
+            "Выберите вариант:",
+            paywall_keyboard(intro_available=intro_available),
+        )
+    await bot.send_message(callback.message.chat.id, text, reply_markup=keyboard)
+
+
+async def _send_checkout(
+    callback: CallbackQuery,
+    *,
+    bot: Bot,
+    payment_service: PaymentProcessor,
+    product_id: str,
+    consented_at: datetime | None,
+) -> None:
+    user_id = _trusted_callback(callback)
+    if user_id is None or callback.message is None:
+        return
+    if not payment_service.production_available():
+        await bot.send_message(callback.message.chat.id, PAYMENTS_UNAVAILABLE_COPY)
+        return
+    try:
+        _order, url = await payment_service.start_checkout(
+            user_id=user_id,
+            product_id=product_id,
+            idempotency_key=uuid4().hex,
+            recurring_consent_at=consented_at,
+        )
+    except Exception:
+        await bot.send_message(callback.message.chat.id, PAYMENTS_UNAVAILABLE_COPY)
+        return
+    await bot.send_message(
+        callback.message.chat.id,
+        "Перейдите к безопасной оплате:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
+        ),
+    )
+
+
+async def handle_billing_product(
+    callback: CallbackQuery, *, bot: Bot, payment_service: PaymentProcessor
+) -> None:
+    await bot.answer_callback_query(callback.id)
+    product_id = (callback.data or "")[len(BILLING_PRODUCT_PREFIX) :]
+    if _trusted_callback(callback) is None or callback.message is None:
+        return
+    try:
+        product = get_product(product_id)
+    except ValueError:
+        return
+    if product.kind is ProductKind.MONTHLY:
+        amount = product.amount_kopecks // 100 if product.amount_kopecks else 0
+        await bot.send_message(
+            callback.message.chat.id,
+            f"{amount:,} ₽ в месяц. Нажимая кнопку ниже, вы соглашаетесь на "
+            "автоматическое ежемесячное списание этой суммы. Отменить "
+            "автопродление можно в любой момент.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="Согласен на автопродление",
+                            callback_data=f"{BILLING_CONSENT_PREFIX}{product.id.value}",
+                        )
+                    ]
+                ]
+            ),
+        )
+        return
+    await _send_checkout(
+        callback,
+        bot=bot,
+        payment_service=payment_service,
+        product_id=product.id.value,
+        consented_at=None,
+    )
+
+
+async def handle_monthly_consent(
+    callback: CallbackQuery, *, bot: Bot, payment_service: PaymentProcessor
+) -> None:
+    await bot.answer_callback_query(callback.id)
+    product_id = (callback.data or "")[len(BILLING_CONSENT_PREFIX) :]
+    try:
+        product = get_product(product_id)
+    except ValueError:
+        return
+    if product.kind is ProductKind.MONTHLY:
+        await _send_checkout(
+            callback,
+            bot=bot,
+            payment_service=payment_service,
+            product_id=product.id.value,
+            consented_at=datetime.now(UTC),
+        )
+
+
+async def handle_ultima(
+    callback: CallbackQuery,
+    *,
+    bot: Bot,
+    settings: AppSettings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await bot.answer_callback_query(callback.id)
+    user_id = _trusted_callback(callback)
+    if (
+        user_id is None
+        or callback.message is None
+        or settings.ultima_manager_contact_url is None
+    ):
+        return
+    async with session_factory() as session:
+        session.add(UltimaLead(telegram_user_id=user_id))
+        await session.commit()
+    await bot.send_message(
+        callback.message.chat.id,
+        ULTIMA_COPY,
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Связаться с менеджером",
+                        url=settings.ultima_manager_contact_url,
+                    )
+                ]
+            ]
+        ),
+    )
+
+
+async def handle_subscription_cancel(
+    callback: CallbackQuery,
+    *,
+    bot: Bot,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await bot.answer_callback_query(callback.id)
+    user_id = _trusted_callback(callback)
+    if user_id is None or callback.message is None:
+        return
+    async with session_factory() as session:
+        subscription = await session.scalar(
+            select(Subscription)
+            .where(
+                Subscription.telegram_user_id == user_id,
+                Subscription.status == "active",
+            )
+            .order_by(Subscription.created_at.desc())
+            .limit(1)
+        )
+        if subscription is not None:
+            subscription.status = "cancelled"
+            subscription.cancelled_at = datetime.now(UTC)
+            await session.commit()
+    await bot.send_message(
+        callback.message.chat.id,
+        "Автопродление отключено. Купленные пакеты генераций сохранены.",
+    )
+
+
 def custom_color_structure_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -211,8 +601,10 @@ async def handle_start_message(
     message: Message,
     *,
     bot: Bot,
+    settings: AppSettings | None = None,
     command: CommandObject | None = None,
     pending_uploads: CustomColorUploads | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> None:
     if not _trusted_private_message(message):
         return
@@ -225,6 +617,28 @@ async def handle_start_message(
             message,
             bot=bot,
             pending_uploads=pending_uploads,
+        )
+        return
+    if command is not None and command.args == "billing":
+        if session_factory is None:
+            raise RuntimeError("session factory is required for a billing launch")
+        sender = message.from_user
+        if sender is None:
+            return
+        await send_paywall(
+            bot,
+            chat_id=message.chat.id,
+            user_id=sender.id,
+            session_factory=session_factory,
+        )
+        return
+    if command is not None and command.args == "open_app":
+        if settings is None:
+            raise RuntimeError("settings are required for an app-launch command")
+        await bot.send_message(
+            message.chat.id,
+            OPEN_APP_COPY,
+            reply_markup=palette_keyboard(text="Открыть приложение", settings=settings),
         )
         return
     await bot.send_message(message.chat.id, NO_SOURCE_COPY)
@@ -610,11 +1024,66 @@ def create_router(
     session_factory: async_sessionmaker[AsyncSession],
     custom_color_service: CustomColorCreator = None,
     job_acceptance_service: JobAcceptor = None,
+    payment_service: PaymentProcessor = None,
 ) -> Router:
     """Build the three ordered private-chat handlers."""
 
     router = Router(name="car-wrap-private-ingress")
     pending_custom_color_uploads: CustomColorUploads = {}
+
+    user_tracking = UserTrackingMiddleware(session_factory)
+    router.message.outer_middleware(user_tracking)
+    router.callback_query.outer_middleware(user_tracking)
+
+    @router.callback_query(F.data == PAYWALL_CALLBACK_DATA)
+    async def paywall_handler(callback: CallbackQuery, bot: Bot) -> None:
+        await handle_paywall_callback(
+            callback, bot=bot, session_factory=session_factory
+        )
+
+    @router.callback_query(F.data == PACKAGES_CALLBACK_DATA)
+    async def packages_handler(callback: CallbackQuery, bot: Bot) -> None:
+        await handle_billing_navigation(
+            callback, bot=bot, session_factory=session_factory, screen="packages"
+        )
+
+    @router.callback_query(F.data == MONTHLY_CALLBACK_DATA)
+    async def monthly_handler(callback: CallbackQuery, bot: Bot) -> None:
+        await handle_billing_navigation(
+            callback, bot=bot, session_factory=session_factory, screen="monthly"
+        )
+
+    @router.callback_query(F.data == BILLING_BACK_CALLBACK_DATA)
+    async def billing_back_handler(callback: CallbackQuery, bot: Bot) -> None:
+        await handle_billing_navigation(
+            callback, bot=bot, session_factory=session_factory, screen="back"
+        )
+
+    @router.callback_query(F.data == ULTIMA_CALLBACK_DATA)
+    async def ultima_handler(callback: CallbackQuery, bot: Bot) -> None:
+        await handle_ultima(
+            callback, bot=bot, settings=settings, session_factory=session_factory
+        )
+
+    @router.callback_query(F.data == BILLING_CANCEL_CALLBACK_DATA)
+    async def billing_cancel_handler(callback: CallbackQuery, bot: Bot) -> None:
+        await handle_subscription_cancel(
+            callback, bot=bot, session_factory=session_factory
+        )
+
+    @router.callback_query(F.data.startswith(BILLING_CONSENT_PREFIX))
+    async def billing_consent_handler(callback: CallbackQuery, bot: Bot) -> None:
+        if payment_service is not None:
+            await handle_monthly_consent(
+                callback, bot=bot, payment_service=payment_service
+            )
+
+    @router.callback_query(F.data.startswith(BILLING_PRODUCT_PREFIX))
+    async def billing_product_handler(callback: CallbackQuery, bot: Bot) -> None:
+        if payment_service is not None:
+            await handle_billing_product(
+                callback, bot=bot, payment_service=payment_service
+            )
 
     @router.callback_query(F.data == CUSTOM_COLOR_REQUEST_CALLBACK_DATA)
     async def custom_color_request_handler(callback: CallbackQuery, bot: Bot) -> None:
@@ -684,8 +1153,10 @@ def create_router(
         await handle_start_message(
             message,
             bot=bot,
+            settings=settings,
             command=command,
             pending_uploads=pending_custom_color_uploads,
+            session_factory=session_factory,
         )
 
     @router.message(

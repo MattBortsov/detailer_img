@@ -61,6 +61,8 @@ def valid_environment() -> dict[str, str]:
         "CLAMAV_SOCKET_PATH": "/run/clamav/clamd.ctl",
         "MODERATION_VISION_MODEL": "google/gemini-2.5-flash",
         "ADMIN_TELEGRAM_USER_IDS": "101,202",
+        "DAILY_STATS_HOUR_UTC": "9",
+        "ULTIMA_MANAGER_CONTACT_URL": "https://t.me/car_wrap_manager",
         "UNRELATED_SECRET": "must-not-be-read",
     }
 
@@ -79,6 +81,7 @@ def test_app_settings_load_only_explicit_environment_contract() -> None:
     assert settings.custom_color_max_bytes == 8 * 1024 * 1024
     assert settings.custom_color_quota == 20
     assert settings.admin_telegram_user_ids == (715709681, 101, 202)
+    assert settings.daily_stats_hour_utc == 9
     assert settings.job_wakeup_channel == "car-wrap.jobs.test"
     assert settings.job_relay_batch_size == 50
     assert settings.job_relay_poll_seconds == 2.5
@@ -99,6 +102,12 @@ def test_app_settings_load_only_explicit_environment_contract() -> None:
     assert settings.openrouter_pool_timeout_seconds == 10
     assert settings.openrouter_image_model == "x-ai/grok-imagine-image-quality"
     assert settings.generation_prompt_revision == "vehicle-wrap-v1"
+    assert settings.payments_production_enabled is False
+    assert settings.payments_owner_approved is False
+    assert settings.ultima_manager_contact_url == "https://t.me/car_wrap_manager"
+    assert (
+        settings.payments_phase1_report_path.as_posix() == "eval/reports/phase-01.json"
+    )
     assert settings.model_config["frozen"] is True
     assert settings.model_config["extra"] == "forbid"
     with pytest.raises(ValidationError):
@@ -147,6 +156,13 @@ def test_app_settings_load_only_explicit_environment_contract() -> None:
         ("CUSTOM_COLOR_QUOTA", "0"),
         ("CLAMAV_SOCKET_PATH", "relative/clamd.sock"),
         ("ADMIN_TELEGRAM_USER_IDS", "101,101"),
+        ("DAILY_STATS_HOUR_UTC", "24"),
+        ("PAYMENTS_PRODUCTION_ENABLED", "yes"),
+        ("PAYMENTS_OWNER_APPROVED", "1"),
+        ("PAYMENTS_PHASE1_REPORT_PATH", "eval/reports/another.json"),
+        ("ULTIMA_MANAGER_CONTACT_URL", "http://t.me/manager"),
+        ("ULTIMA_MANAGER_CONTACT_URL", "https://example.com/manager"),
+        ("ULTIMA_MANAGER_CONTACT_URL", "https://t.me/"),
     ],
 )
 def test_app_settings_reject_unsafe_values(key: str, value: str) -> None:

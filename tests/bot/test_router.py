@@ -17,6 +17,7 @@ from car_wrap.bot.router import (
     CUSTOM_COLOR_REQUEST_COPY,
     CUSTOM_COLOR_STRUCTURE_COPY,
     NO_SOURCE_COPY,
+    OPEN_APP_COPY,
     UNSUPPORTED_MESSAGE_COPY,
     CustomColorUploadState,
     create_router,
@@ -176,6 +177,23 @@ async def test_start_and_unsupported_copy_are_exact() -> None:
 
     assert bot.sent[0]["text"] == NO_SOURCE_COPY
     assert bot.sent[1]["text"] == UNSUPPORTED_MESSAGE_COPY
+
+
+@pytest.mark.asyncio
+async def test_app_start_command_sends_a_fresh_launcher_message() -> None:
+    bot = FakeBot()
+
+    await handle_start_message(
+        message(),
+        bot=bot,
+        settings=settings(),
+        command=SimpleNamespace(args="open_app"),
+    )
+
+    assert bot.sent[0]["text"] == OPEN_APP_COPY
+    button = bot.sent[0]["reply_markup"].inline_keyboard[0][0]
+    assert button.text == "Открыть приложение"
+    assert button.web_app.url == "https://wrap.example.com/app"
 
 
 @pytest.mark.asyncio
@@ -532,4 +550,4 @@ async def test_download_failure_is_sanitized() -> None:
 def test_router_registers_private_start_media_and_fallback_handlers() -> None:
     router = create_router(settings=settings(), session_factory=FakeSessions())
     assert len(router.message.handlers) == 3
-    assert len(router.callback_query.handlers) == 6
+    assert len(router.callback_query.handlers) == 14

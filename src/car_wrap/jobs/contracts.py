@@ -32,6 +32,7 @@ class AcceptanceErrorCode(StrEnum):
     INVALID_SELECTION = "invalid_selection"
     ACTIVE_LIMIT = "active_limit"
     RECENT_LIMIT = "recent_limit"
+    ALLOWANCE_REQUIRED = "allowance_required"
 
 
 class AttemptState(StrEnum):

@@ -18,6 +18,7 @@ from car_wrap.api.custom_colors import router as custom_colors_router
 from car_wrap.api.routes.health import router as health_router
 from car_wrap.api.routes.jobs import router as jobs_router
 from car_wrap.api.routes.palette import router as palette_router
+from car_wrap.api.routes.payments import router as payments_router
 from car_wrap.api.routes.session import router as session_router
 from car_wrap.config import AppSettings
 from car_wrap.services.telegram_auth import exchange_init_data
@@ -44,6 +45,7 @@ def create_app(
     custom_color_repository: Any = None,
     job_acceptance_service: Any = None,
     telegram_bot: Any = None,
+    payment_service: Any = None,
     lifespan: Any = None,
 ) -> FastAPI:
     """Build an app with explicit configuration and persistence boundaries."""
@@ -64,11 +66,13 @@ def create_app(
     app.state.custom_color_repository = custom_color_repository
     app.state.job_acceptance_service = job_acceptance_service
     app.state.telegram_bot = telegram_bot
+    app.state.payment_service = payment_service
     app.include_router(health_router)
     app.include_router(session_router)
     app.include_router(palette_router)
     app.include_router(jobs_router)
     app.include_router(custom_colors_router)
+    app.include_router(payments_router)
 
     @app.middleware("http")
     async def security_policy(request: Request, call_next: Any) -> Any:

@@ -107,7 +107,7 @@ async def palette_state(
         source_preview_url=(
             "/api/v1/active-source/image" if source is not None else None
         ),
-        bot_chat_url=f"https://t.me/{settings.bot_username}",
+        bot_chat_url=settings.bot_chat_url,
         privacy_text=PRIVACY_TEXT,
         session_expires_at=current.expires_at,
         is_admin=current.telegram_user_id in settings.admin_telegram_user_ids,
@@ -207,7 +207,7 @@ async def request_photo_replacement(
     settings = request.app.state.settings
     return PhotoReplacementOut(
         status="prompt_sent",
-        bot_chat_url=f"https://t.me/{settings.bot_username}",
+        bot_chat_url=settings.bot_chat_url,
     )
 
 

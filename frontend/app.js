@@ -18,7 +18,8 @@ import {
 } from "./state.js";
 
 const HEX_PATTERN = /^#[0-9A-Fa-f]{6}$/;
-const BOT_URL_PATTERN = /^https:\/\/t\.me\/[A-Za-z][A-Za-z0-9_]{4,31}$/;
+const BOT_URL_PATTERN =
+  /^https:\/\/t\.me\/[A-Za-z][A-Za-z0-9_]{4,31}[Bb][Oo][Tt]\?start=(?:open_app|billing)$/;
 const SOURCE_PREVIEW_URL = "/api/v1/active-source/image";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -414,11 +415,8 @@ async function exchangeSession() {
     return false;
   }
   sessionExchangeAttempted = true;
-  let launchEvidence = telegram.initData;
-  if (typeof launchEvidence !== "string" || launchEvidence.length === 0) {
-    launchEvidence = "";
-    return false;
-  }
+  let launchEvidence =
+    typeof telegram.initData === "string" ? telegram.initData : "";
   try {
     const response = await fetch("/api/v1/tma/session", {
       method: "POST",
@@ -883,6 +881,14 @@ async function submitSelectedChoice() {
         accepted ? "accepted" : "failed",
         accepted ? payload.bot_chat_url : null,
       );
+    } else if (response.status === 402) {
+      const billingUrl = trustedBotUrl(
+        response.headers.get("X-Billing-Chat-Url"),
+      );
+      if (billingUrl) {
+        openTelegramUrl(billingUrl);
+      }
+      state = completeSubmission(state, "failed");
     } else if (response.status === 409 || response.status === 429) {
       const payload = await response.json();
       const code =

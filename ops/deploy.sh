@@ -57,7 +57,7 @@ done
 compose restart nginx
 wait_for_service nginx
 
-for service in api bot relay worker postgres redis nginx; do
+for service in api bot daily-stats relay worker postgres redis nginx; do
   count="$(compose ps -q "$service" | awk 'NF {count++} END {print count+0}')"
   [[ "$count" == "1" ]] || fail "singleton count failed: $service"
 done

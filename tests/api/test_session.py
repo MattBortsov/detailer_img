@@ -39,6 +39,9 @@ class FakeSession:
     async def commit(self) -> None:
         self.commits += 1
 
+    async def execute(self, statement: object) -> None:
+        del statement
+
 
 class SessionContext:
     def __init__(self, session: FakeSession) -> None:
@@ -143,7 +146,9 @@ async def test_malformed_authorization_is_one_safe_unauthorized(
 
     assert response.status_code == 401
     assert response.json() == {"detail": "Unauthorized"}
-    assert response.headers["x-bot-chat-url"] == "https://t.me/CarWrapBot"
+    assert response.headers["x-bot-chat-url"] == (
+        "https://t.me/CarWrapBot?start=open_app"
+    )
     assert response.headers["cache-control"] == "no-store"
     rendered = response.text + repr(response.headers)
     assert "signed-launch-canary" not in rendered

@@ -18,6 +18,7 @@ def test_singleton_runtime_graph_is_complete() -> None:
         "migrate",
         "api",
         "bot",
+        "daily-stats",
         "relay",
         "worker",
         "nginx",
@@ -25,6 +26,11 @@ def test_singleton_runtime_graph_is_complete() -> None:
     assert set(SERVICES) == expected
     assert SERVICES["worker"]["command"] == ["python", "-m", "car_wrap.worker.main"]
     assert SERVICES["bot"]["command"] == ["python", "-m", "car_wrap.bot.main"]
+    assert SERVICES["daily-stats"]["command"] == [
+        "python",
+        "-m",
+        "car_wrap.stats.main",
+    ]
     assert SERVICES["relay"]["command"] == ["python", "-m", "car_wrap.jobs.main"]
 
 
@@ -45,6 +51,7 @@ def test_long_running_services_have_bounded_logs_and_restart() -> None:
         "clamav",
         "api",
         "bot",
+        "daily-stats",
         "relay",
         "worker",
         "nginx",

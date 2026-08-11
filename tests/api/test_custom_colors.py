@@ -143,7 +143,7 @@ async def test_prompt_is_sent_to_authenticated_owner_before_chat_opens() -> None
     assert response.headers["cache-control"] == "no-store"
     assert response.json() == {
         "status": "prompt_sent",
-        "bot_chat_url": "https://t.me/CarWrapBot",
+        "bot_chat_url": "https://t.me/CarWrapBot?start=open_app",
     }
     assert telegram.sent[0]["chat_id"] == 1001
     assert telegram.sent[0]["text"] == CUSTOM_COLOR_STRUCTURE_COPY

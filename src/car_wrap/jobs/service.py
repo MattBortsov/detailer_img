@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from car_wrap.billing.allowances import AllowanceService, AllowanceUnavailable
 from car_wrap.custom_colors.repository import CustomColorRepository
 from car_wrap.db.models import CustomColor
 from car_wrap.jobs.contracts import (
@@ -42,6 +43,7 @@ class JobAcceptanceService:
         max_recent: int,
         window_seconds: int,
         clock: Callable[[], datetime] | None = None,
+        allowances: AllowanceService | None = None,
     ) -> None:
         self._repository = repository
         self._custom_colors = custom_colors
@@ -51,6 +53,7 @@ class JobAcceptanceService:
         self._max_recent = max_recent
         self._window_seconds = window_seconds
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._allowances = allowances or AllowanceService()
 
     async def accept(
         self,
@@ -94,6 +97,14 @@ class JobAcceptanceService:
                 prompt_revision=self._prompt_revision,
                 now=now,
             )
+            try:
+                await self._allowances.reserve(
+                    session, user_id=user_id, job_id=job.id, now=now
+                )
+            except AllowanceUnavailable as error:
+                raise JobAcceptanceError(
+                    AcceptanceErrorCode.ALLOWANCE_REQUIRED
+                ) from error
             await session.commit()
             return AcceptedJob(job.id, JobStatus.QUEUED)
         except Exception:

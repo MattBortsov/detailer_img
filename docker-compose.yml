@@ -29,6 +29,7 @@ x-app-environment: &app-environment
   OPENROUTER_WRITE_TIMEOUT_SECONDS: ${OPENROUTER_WRITE_TIMEOUT_SECONDS:-30}
   OPENROUTER_POOL_TIMEOUT_SECONDS: ${OPENROUTER_POOL_TIMEOUT_SECONDS:-10}
   ADMIN_TELEGRAM_USER_IDS: ${ADMIN_TELEGRAM_USER_IDS:-}
+  DAILY_STATS_HOUR_UTC: ${DAILY_STATS_HOUR_UTC:-9}
   CUSTOM_COLOR_STORAGE_ROOT: /var/lib/car-wrap/custom-colors
   CUSTOM_COLOR_MAX_BYTES: ${CUSTOM_COLOR_MAX_BYTES:-8388608}
   CUSTOM_COLOR_MAX_SIDE_PX: ${CUSTOM_COLOR_MAX_SIDE_PX:-8192}
@@ -228,6 +229,26 @@ services:
       migrate:
         condition: service_completed_successfully
     mem_limit: 256m
+    ulimits: *no-core-dumps
+    logging: *default-logging
+
+  daily-stats:
+    <<: *app-image
+    command: ["python", "-m", "car_wrap.stats.main"]
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    environment: *app-environment
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    mem_limit: 128m
     ulimits: *no-core-dumps
     logging: *default-logging
 

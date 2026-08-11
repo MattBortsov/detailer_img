@@ -152,6 +152,30 @@ class AppSettings(BaseModel):
     clamav_socket_path: Path = Path("/run/clamav/clamd.ctl")
     moderation_vision_model: str = "google/gemini-2.5-flash"
     admin_telegram_user_ids: tuple[int, ...] = DEFAULT_ADMIN_TELEGRAM_USER_IDS
+    daily_stats_hour_utc: int = Field(default=9, strict=True, ge=0, le=23)
+    tbank_terminal_key: str | None = None
+    tbank_password: SecretStr | None = None
+    tbank_api_base_url: str = "https://securepay.tinkoff.ru/v2"
+    tbank_notification_url: str | None = None
+    tbank_success_url: str | None = None
+    tbank_fail_url: str | None = None
+    payments_production_enabled: bool = Field(default=False, strict=True)
+    payments_owner_approved: bool = Field(default=False, strict=True)
+    payments_phase1_report_path: Path = Path("eval/reports/phase-01.json")
+    ultima_manager_contact_url: str | None = None
+    subscription_scan_seconds: float = Field(default=300.0, gt=0, le=3600)
+
+    @property
+    def bot_chat_url(self) -> str:
+        """A chat deep link that asks the bot to post a fresh app launcher."""
+
+        return f"https://t.me/{self.bot_username}?start=open_app"
+
+    @property
+    def billing_chat_url(self) -> str:
+        """A chat deep link that opens the authenticated bot paywall."""
+
+        return f"https://t.me/{self.bot_username}?start=billing"
 
     @field_validator("database_url")
     @classmethod
@@ -183,6 +207,53 @@ class AppSettings(BaseModel):
             or parsed.password is not None
         ):
             raise ValueError("Mini App URL must be an HTTPS URL")
+        return value
+
+    @field_validator("ultima_manager_contact_url")
+    @classmethod
+    def validate_ultima_manager_contact_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname not in {"t.me", "telegram.me"}
+            or not parsed.path.strip("/")
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("manager contact must be a clean HTTPS Telegram link")
+        return value.rstrip("/")
+
+    @field_validator(
+        "tbank_api_base_url",
+        "tbank_notification_url",
+        "tbank_success_url",
+        "tbank_fail_url",
+    )
+    @classmethod
+    def validate_tbank_urls(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("T-Bank URL must be a clean HTTPS URL")
+        return value.rstrip("/")
+
+    @field_validator("payments_phase1_report_path")
+    @classmethod
+    def validate_phase1_report_path(cls, value: Path) -> Path:
+        if value != Path("eval/reports/phase-01.json"):
+            raise ValueError("Phase 1 payment report path is fixed")
         return value
 
     @field_validator("redis_url")
@@ -309,6 +380,14 @@ class AppSettings(BaseModel):
             "CUSTOM_COLOR_STORAGE_ROOT": "custom_color_storage_root",
             "CLAMAV_SOCKET_PATH": "clamav_socket_path",
             "MODERATION_VISION_MODEL": "moderation_vision_model",
+            "TBANK_TERMINAL_KEY": "tbank_terminal_key",
+            "TBANK_PASSWORD": "tbank_password",
+            "TBANK_API_BASE_URL": "tbank_api_base_url",
+            "TBANK_NOTIFICATION_URL": "tbank_notification_url",
+            "TBANK_SUCCESS_URL": "tbank_success_url",
+            "TBANK_FAIL_URL": "tbank_fail_url",
+            "PAYMENTS_PHASE1_REPORT_PATH": "payments_phase1_report_path",
+            "ULTIMA_MANAGER_CONTACT_URL": "ultima_manager_contact_url",
         }
         integer_fields = {
             "INIT_DATA_MAX_BYTES": "init_data_max_bytes",
@@ -334,6 +413,7 @@ class AppSettings(BaseModel):
                 "custom_color_decode_timeout_seconds"
             ),
             "CUSTOM_COLOR_QUOTA": "custom_color_quota",
+            "DAILY_STATS_HOUR_UTC": "daily_stats_hour_utc",
             "PROVIDER_MAX_OUTPUT_BYTES": "provider_max_output_bytes",
             "PROVIDER_MAX_IMAGE_SIDE_PX": "provider_max_image_side_px",
             "PROVIDER_MAX_IMAGE_PIXELS": "provider_max_image_pixels",
@@ -343,11 +423,23 @@ class AppSettings(BaseModel):
         for environment_name, field_name in string_fields.items():
             if environment_name in source:
                 values[field_name] = source[environment_name]
+        boolean_fields = {
+            "PAYMENTS_PRODUCTION_ENABLED": "payments_production_enabled",
+            "PAYMENTS_OWNER_APPROVED": "payments_owner_approved",
+        }
+        for environment_name, field_name in boolean_fields.items():
+            if environment_name in source:
+                raw = source[environment_name].strip().lower()
+                values[field_name] = raw == "true" if raw in {"true", "false"} else raw
         for environment_name, field_name in integer_fields.items():
             if environment_name in source:
                 values[field_name] = int(source[environment_name])
         if "JOB_RELAY_POLL_SECONDS" in source:
             values["job_relay_poll_seconds"] = float(source["JOB_RELAY_POLL_SECONDS"])
+        if "SUBSCRIPTION_SCAN_SECONDS" in source:
+            values["subscription_scan_seconds"] = float(
+                source["SUBSCRIPTION_SCAN_SECONDS"]
+            )
         float_fields = {
             "JOB_WORKER_POLL_SECONDS": "job_worker_poll_seconds",
             "OPENROUTER_CONNECT_TIMEOUT_SECONDS": (

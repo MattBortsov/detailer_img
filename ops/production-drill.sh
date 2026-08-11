@@ -36,7 +36,7 @@ wait_healthy() {
 blogger_before="$(blogger_running)"
 (( blogger_before >= 2 )) || fail "Blogger Bot baseline is not healthy"
 
-for service in api bot relay worker postgres redis nginx; do
+for service in api bot daily-stats relay worker postgres redis nginx; do
   count="$(compose ps -q "$service" | awk 'NF {count++} END {print count+0}')"
   [[ "$count" == "1" ]] || fail "singleton count failed: $service"
 done

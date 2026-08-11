@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from car_wrap.billing.allowances import AllowanceService
 from car_wrap.custom_colors.repository import CustomColorRepository
 from car_wrap.db.models import CustomColorVersion, GenerationAttempt, GenerationJob
 from car_wrap.jobs.contracts import (
@@ -26,8 +27,13 @@ class LostLeaseError(RuntimeError):
 
 
 class WorkerRepository:
-    def __init__(self, custom_colors: CustomColorRepository) -> None:
+    def __init__(
+        self,
+        custom_colors: CustomColorRepository,
+        allowances: AllowanceService | None = None,
+    ) -> None:
         self._custom_colors = custom_colors
+        self._allowances = allowances or AllowanceService()
 
     async def claim(
         self,
@@ -241,6 +247,7 @@ class WorkerRepository:
         job.status = "succeeded"
         job.result_message_id = receipt.message_id
         await self._finish_job(session, job, now=now)
+        await self._allowances.consume_after_receipt(session, job_id=job.id, now=now)
 
     async def mark_failed(
         self,
@@ -264,6 +271,7 @@ class WorkerRepository:
         job.error_code = code.value
         job.error_summary = summary[:240]
         await self._finish_job(session, job, now=now)
+        await self._allowances.release_terminal(session, job_id=job.id, now=now)
 
     async def reconcile_expired(
         self,

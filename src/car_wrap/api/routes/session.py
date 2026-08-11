@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import JSONResponse
 
 from car_wrap.services.telegram_auth import TelegramAuthenticationError
+from car_wrap.services.telegram_users import record_telegram_user
 
 router = APIRouter(prefix="/api/v1/tma", tags=["telegram-session"])
 
@@ -35,7 +36,7 @@ async def create_session(request: Request) -> Response:
 
     headers = raw_authorization_headers(request)
     settings = request.app.state.settings
-    bot_chat_url = f"https://t.me/{settings.bot_username}"
+    bot_chat_url = settings.bot_chat_url
     if len(headers) != 1 or request.query_params:
         return unauthorized_response(bot_chat_url)
     raw_header = headers[0]
@@ -59,6 +60,7 @@ async def create_session(request: Request) -> Response:
                 settings=settings,
                 now=request.app.state.clock(),
             )
+            await record_telegram_user(session, issued.telegram_user_id)
             await session.commit()
     except TelegramAuthenticationError:
         return unauthorized_response(bot_chat_url)

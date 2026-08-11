@@ -68,6 +68,14 @@ def test_exact_three_mode_navigation_and_surprise_panel() -> None:
     assert "Проверяем сессию" not in " ".join(parser.text)
 
 
+def test_allowance_required_opens_the_authenticated_bot_paywall() -> None:
+    _, _, js, _ = sources()
+    assert 'response.status === 402' in js
+    assert 'response.headers.get("X-Billing-Chat-Url")' in js
+    assert "start=(?:open_app|billing)" in js
+    assert "openTelegramUrl(billingUrl)" in js
+
+
 def test_native_card_surfaces_flip_without_coupling_selection() -> None:
     html, css, js, parser = sources()
     warning = "Цвет на экране может отличаться от реальной плёнки."
@@ -233,8 +241,11 @@ def test_palette_removes_requested_chrome_and_keeps_chat_return() -> None:
     assert 'id="privacy-copy"' not in html
     assert 'id="submit-button"' not in html
     assert 'id="action-hint"' not in html
-    assert "Открыть чат" not in html
-    assert html.count("Вернуться в чат") == 4
+    assert html.count("Открыть чат") == 1
+    assert html.count("Вернуться в чат") == 3
+    assert "Не могу определить фото вашего авто" in html  # noqa: RUF001
+    assert "Приложение открыто из другого чата" in html
+    assert "кнопку «Открыть приложение»" in html
     assert ".confirm-color-dialog .icon-button" in css
     assert "top: var(--space-sm)" in css
     assert "right: var(--space-sm)" in css

@@ -157,7 +157,7 @@ async def request_custom_color_prompt(
     settings = request.app.state.settings
     return CustomColorPromptOut(
         status="prompt_sent",
-        bot_chat_url=f"https://t.me/{settings.bot_username}",
+        bot_chat_url=settings.bot_chat_url,
     )
 
 
