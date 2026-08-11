@@ -942,6 +942,46 @@ class RobokassaPayment(Base):
     )
 
 
+class IntroRecurringChargeSource(Base):
+    """A revocable Robokassa source for user-initiated 25 ₽ repeat charges."""
+
+    __tablename__ = "intro_recurring_charge_sources"
+    __table_args__ = (
+        UniqueConstraint("source_order_id"),
+        UniqueConstraint("parent_invoice_id"),
+        Index(
+            "uq_intro_recurring_charge_sources_active_user",
+            "telegram_user_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+        CheckConstraint("telegram_user_id > 0", name="telegram_user_id_positive"),
+        CheckConstraint("parent_invoice_id > 0", name="parent_invoice_id_positive"),
+        CheckConstraint("amount_kopecks = 2500", name="amount_is_intro_price"),
+        CheckConstraint("status IN ('active', 'cancelled')", name="status_supported"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    telegram_user_id: Mapped[int] = mapped_column(
+        ForeignKey("telegram_users.telegram_user_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    source_order_id: Mapped[UUID] = mapped_column(
+        ForeignKey("billing_orders.id", ondelete="RESTRICT"), nullable=False
+    )
+    parent_invoice_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount_kopecks: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class Subscription(Base):
     """Period-bound recurring-plan metadata and idempotent period key."""
 
@@ -958,8 +998,7 @@ class Subscription(Base):
             "billing_period_end > billing_period_start", name="billing_period_order"
         ),
         CheckConstraint(
-            "robokassa_parent_invoice_id IS NULL "
-            "OR robokassa_parent_invoice_id > 0",
+            "robokassa_parent_invoice_id IS NULL OR robokassa_parent_invoice_id > 0",
             name="robokassa_parent_invoice_id_positive",
         ),
     )

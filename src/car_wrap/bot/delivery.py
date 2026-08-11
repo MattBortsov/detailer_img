@@ -110,11 +110,11 @@ def result_keyboard(mini_app_url: str) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Новая генерация",
+                    text="✨ Новая генерация",
                     web_app=WebAppInfo(url=mini_app_url),
                 ),
                 InlineKeyboardButton(
-                    text="Меню",
+                    text="☰ Меню",
                     callback_data=MENU_CALLBACK_DATA,
                 ),
             ]
@@ -129,11 +129,11 @@ def payment_confirmed_keyboard(mini_app_url: str) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Сгенерировать",
+                    text="🎨 Сгенерировать",
                     web_app=WebAppInfo(url=mini_app_url),
                 ),
                 InlineKeyboardButton(
-                    text="Меню",
+                    text="☰ Меню",
                     callback_data=MENU_CALLBACK_DATA,
                 ),
             ]

@@ -25,6 +25,7 @@ from car_wrap.billing.repository import BillingRepository
 from car_wrap.db.models import (
     AllowanceBalance,
     BillingOrder,
+    IntroRecurringChargeSource,
     RobokassaPayment,
     Subscription,
 )
@@ -97,7 +98,7 @@ class PaymentService:
                 external_order_id=str(order.id),
                 amount_kopecks=amount_kopecks,
                 description=f"Car Wrap: {product.id.value}",
-                recurring=product.kind is ProductKind.MONTHLY,
+                recurring=product.kind in {ProductKind.INTRO, ProductKind.MONTHLY},
             )
         except PaymentGatewayOutcomeAmbiguous:
             raise
@@ -110,6 +111,115 @@ class PaymentService:
             status="pending",
         )
         return order, checkout.redirect_url
+
+    async def has_active_intro_recurring_source(self, *, user_id: int) -> bool:
+        async with self._session_factory() as session:
+            source = await session.scalar(
+                select(IntroRecurringChargeSource.id)
+                .where(
+                    IntroRecurringChargeSource.telegram_user_id == user_id,
+                    IntroRecurringChargeSource.status == "active",
+                )
+                .limit(1)
+            )
+        return source is not None
+
+    async def start_intro_recurring_charge(
+        self, *, user_id: int
+    ) -> BillingOrder | None:
+        """Create one user-triggered 25 ₽ charge without opening a payment page."""
+
+        self._gateway.ensure_available()
+        product = get_payable_product("intro_25")
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._repository.lock_account(session, user_id=user_id)
+                source = await session.scalar(
+                    select(IntroRecurringChargeSource)
+                    .where(
+                        IntroRecurringChargeSource.telegram_user_id == user_id,
+                        IntroRecurringChargeSource.status == "active",
+                    )
+                    .with_for_update()
+                )
+                if source is None:
+                    return None
+                parent_invoice_id = source.parent_invoice_id
+                pending_charge = await session.scalar(
+                    select(BillingOrder.id)
+                    .where(
+                        BillingOrder.telegram_user_id == user_id,
+                        BillingOrder.product_id == product.id.value,
+                        BillingOrder.status == "pending",
+                    )
+                    .limit(1)
+                )
+                if pending_charge is not None:
+                    return None
+                try:
+                    intro_number = await self._next_intro_number(
+                        session,
+                        user_id=user_id,
+                        product_kind=product.kind,
+                    )
+                except PaymentConfirmationError:
+                    return None
+                order = BillingOrder(
+                    telegram_user_id=user_id,
+                    product_id=product.id.value,
+                    amount_kopecks=product.amount_kopecks or 0,
+                    intro_number=intro_number,
+                    idempotency_key=f"intro-recurring:{uuid4().hex}",
+                )
+                session.add(order)
+                await session.flush()
+                session.add(
+                    RobokassaPayment(
+                        order_id=order.id,
+                        invoice_id=None,
+                        previous_invoice_id=parent_invoice_id,
+                        status="initializing",
+                    )
+                )
+
+        try:
+            recurring = await self._gateway.submit_recurring(
+                external_order_id=str(order.id),
+                previous_invoice_id=parent_invoice_id,
+                amount_kopecks=product.amount_kopecks or 0,
+                description="Car Wrap: intro_25",
+            )
+        except PaymentGatewayOutcomeAmbiguous:
+            raise
+        except (PaymentGatewayRequestNotSent, PaymentGatewayProtocolError):
+            await self._mark_gateway_rejected(order_id=order.id)
+            raise
+        await self._record_gateway_invoice(
+            order_id=order.id,
+            invoice_id=recurring.invoice_id,
+            status="submitted",
+        )
+        return order
+
+    async def cancel_intro_recurring_source(self, *, user_id: int) -> bool:
+        """Prevent future server-initiated 25 ₽ charges for one user."""
+
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._repository.lock_account(session, user_id=user_id)
+                source = await session.scalar(
+                    select(IntroRecurringChargeSource)
+                    .where(
+                        IntroRecurringChargeSource.telegram_user_id == user_id,
+                        IntroRecurringChargeSource.status == "active",
+                    )
+                    .with_for_update()
+                )
+                if source is None:
+                    return False
+                source.status = "cancelled"
+                source.cancelled_at = datetime.now(UTC)
+        return True
 
     async def start_renewal(
         self,
@@ -415,7 +525,7 @@ class PaymentService:
         now: datetime,
     ) -> None:
         allowance = product.allowance
-        if allowance is None or payment.previous_invoice_id is not None:
+        if allowance is None:
             raise PaymentConfirmationError
         subscription_id: UUID | None = None
         expires_at: datetime | None = None
@@ -443,6 +553,42 @@ class PaymentService:
             subscription_id = subscription.id
             expires_at = subscription.billing_period_end
             allowance_kind = AllowanceKind.MONTHLY
+        elif product.kind is ProductKind.INTRO:
+            if payment.invoice_id is None:
+                raise PaymentConfirmationError
+            if payment.previous_invoice_id is None:
+                active_source = await session.scalar(
+                    select(IntroRecurringChargeSource.id)
+                    .where(
+                        IntroRecurringChargeSource.telegram_user_id
+                        == order.telegram_user_id,
+                        IntroRecurringChargeSource.status == "active",
+                    )
+                    .limit(1)
+                )
+                if active_source is None:
+                    session.add(
+                        IntroRecurringChargeSource(
+                            telegram_user_id=order.telegram_user_id,
+                            source_order_id=order.id,
+                            parent_invoice_id=payment.invoice_id,
+                            amount_kopecks=order.amount_kopecks,
+                        )
+                    )
+            else:
+                source = await session.scalar(
+                    select(IntroRecurringChargeSource.id)
+                    .where(
+                        IntroRecurringChargeSource.telegram_user_id
+                        == order.telegram_user_id,
+                        IntroRecurringChargeSource.parent_invoice_id
+                        == payment.previous_invoice_id,
+                        IntroRecurringChargeSource.status == "active",
+                    )
+                    .limit(1)
+                )
+                if source is None:
+                    raise PaymentConfirmationError
         balance = (
             None
             if allowance_kind is AllowanceKind.MONTHLY
@@ -519,8 +665,7 @@ class PaymentService:
         if (
             subscription is None
             or order.renewal_period_start != subscription.billing_period_start
-            or payment.previous_invoice_id
-            != subscription.robokassa_parent_invoice_id
+            or payment.previous_invoice_id != subscription.robokassa_parent_invoice_id
         ):
             raise PaymentConfirmationError
         if product.allowance is None:

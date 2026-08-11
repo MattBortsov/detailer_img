@@ -7,6 +7,7 @@ import logging
 
 import httpx
 from aiogram import Bot, Dispatcher
+from aiogram.types import BotCommand
 
 from car_wrap.billing.gateway import PaymentGatewayClient
 from car_wrap.billing.payments import PaymentService
@@ -50,6 +51,9 @@ async def run_polling(settings: AppSettings) -> None:
             job_acceptance_service=job_service,
             payment_service=payments,
         )
+    )
+    await bot.set_my_commands(
+        [BotCommand(command="billing", description="Оплата и подписка")]
     )
     subscription_stop, subscription_task = start_subscription_scanner(
         subscriptions,

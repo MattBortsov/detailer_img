@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 
 from aiogram import BaseMiddleware, Bot, F, Router
 from aiogram.enums import ChatType
-from aiogram.filters import CommandObject, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import (
     CallbackQuery,
     Document,
@@ -99,6 +99,7 @@ ULTIMA_CALLBACK_DATA = "billing:ultima"
 BILLING_PRODUCT_PREFIX = "billing:product:"
 BILLING_CONSENT_PREFIX = "billing:consent:"
 BILLING_CANCEL_CALLBACK_DATA = "billing:cancel"
+BILLING_CANCEL_INTRO_RECURRING_CALLBACK_DATA = "billing:cancel_intro_recurring"
 ULTIMA_COPY = (
     "Свяжитесь с менеджером, чтобы узнать стоимость конкретно для вашего бизнеса."
 )
@@ -219,34 +220,38 @@ def palette_keyboard(
 def menu_keyboard(settings: AppSettings) -> InlineKeyboardMarkup:
     """Keep the primary actions and common service information in one menu."""
 
-    support_button = InlineKeyboardButton(
-        text="Поддержка",
-        url=settings.ultima_manager_contact_url,
-    ) if settings.ultima_manager_contact_url else InlineKeyboardButton(
-        text="Поддержка", callback_data=f"{INFO_CALLBACK_PREFIX}{INFO_SUPPORT}"
+    support_button = (
+        InlineKeyboardButton(
+            text="💬 Поддержка",
+            url=settings.ultima_manager_contact_url,
+        )
+        if settings.ultima_manager_contact_url
+        else InlineKeyboardButton(
+            text="💬 Поддержка", callback_data=f"{INFO_CALLBACK_PREFIX}{INFO_SUPPORT}"
+        )
     )
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Сгенерировать",
+                    text="🎨 Сгенерировать",
                     web_app=WebAppInfo(url=settings.mini_app_url),
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="Как это работает",
+                    text="ℹ️ Как это работает",
                     callback_data=f"{INFO_CALLBACK_PREFIX}{INFO_HOW_TO}",
                 ),
                 InlineKeyboardButton(
-                    text="Тарифы",
+                    text="💳 Тарифы",
                     callback_data=f"{INFO_CALLBACK_PREFIX}{INFO_PRICES}",
                 ),
             ],
             [
                 support_button,
                 InlineKeyboardButton(
-                    text="Конфиденциальность",
+                    text="🔒 Конфиденциальность",
                     callback_data=f"{INFO_CALLBACK_PREFIX}{INFO_PRIVACY}",
                 ),
             ],
@@ -259,7 +264,7 @@ def replace_photo_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Отмена",
+                    text="← Отмена",
                     callback_data=REPLACE_PHOTO_CANCEL_CALLBACK_DATA,
                 )
             ]
@@ -267,21 +272,28 @@ def replace_photo_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def paywall_keyboard(*, intro_available: bool) -> InlineKeyboardMarkup:
+def paywall_keyboard(
+    *,
+    intro_available: bool,
+    intro_checkout_url: str | None = None,
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if intro_available:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="1 генерация — 25 ₽",
-                    callback_data=f"{BILLING_PRODUCT_PREFIX}intro_25",
-                )
-            ]
+        intro_button = (
+            InlineKeyboardButton(text="💳 1 генерация — 25 ₽", url=intro_checkout_url)
+            if intro_checkout_url is not None
+            else InlineKeyboardButton(
+                text="💳 1 генерация — 25 ₽",
+                callback_data=f"{BILLING_PRODUCT_PREFIX}intro_25",
+            )
         )
+        rows.append([intro_button])
     rows.append(
         [
-            InlineKeyboardButton(text="Пакеты", callback_data=PACKAGES_CALLBACK_DATA),
-            InlineKeyboardButton(text="Месяц", callback_data=MONTHLY_CALLBACK_DATA),
+            InlineKeyboardButton(
+                text="📦 Пакеты", callback_data=PACKAGES_CALLBACK_DATA
+            ),
+            InlineKeyboardButton(text="🗓️ Месяц", callback_data=MONTHLY_CALLBACK_DATA),
         ]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -292,8 +304,21 @@ def subscription_cancel_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Отключить автопродление",
+                    text="⛔ Отключить автопродление",
                     callback_data=BILLING_CANCEL_CALLBACK_DATA,
+                )
+            ]
+        ]
+    )
+
+
+def intro_recurring_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="⛔ Отключить автосписания 25 ₽",
+                    callback_data=BILLING_CANCEL_INTRO_RECURRING_CALLBACK_DATA,
                 )
             ]
         ]
@@ -305,25 +330,25 @@ def package_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="5 генераций — 149 ₽",
+                    text="📦 5 генераций — 149 ₽",
                     callback_data=f"{BILLING_PRODUCT_PREFIX}pack_5",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="15 генераций — 349 ₽",
+                    text="📦 15 генераций — 349 ₽",
                     callback_data=f"{BILLING_PRODUCT_PREFIX}pack_15",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="40 генераций — 749 ₽",
+                    text="📦 40 генераций — 749 ₽",
                     callback_data=f"{BILLING_PRODUCT_PREFIX}pack_40",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="Назад", callback_data=BILLING_BACK_CALLBACK_DATA
+                    text="← Назад", callback_data=BILLING_BACK_CALLBACK_DATA
                 )
             ],
         ]
@@ -335,24 +360,24 @@ def monthly_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Plus: 30 генераций — 499 ₽/месяц",
+                    text="🗓️ Plus: 30 генераций — 499 ₽/месяц",
                     callback_data=f"{BILLING_PRODUCT_PREFIX}plus",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="Studio: 100 генераций — 1 499 ₽/месяц",
+                    text="🗓️ Studio: 100 генераций — 1 499 ₽/месяц",
                     callback_data=f"{BILLING_PRODUCT_PREFIX}studio",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="Ultima — Узнать цену", callback_data=ULTIMA_CALLBACK_DATA
+                    text="💎 Ultima — Узнать цену", callback_data=ULTIMA_CALLBACK_DATA
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="Назад", callback_data=BILLING_BACK_CALLBACK_DATA
+                    text="← Назад", callback_data=BILLING_BACK_CALLBACK_DATA
                 )
             ],
         ]
@@ -379,6 +404,7 @@ async def handle_paywall_callback(
     *,
     bot: Bot,
     session_factory: async_sessionmaker[AsyncSession],
+    payment_service: PaymentProcessor | None,
 ) -> None:
     await bot.answer_callback_query(callback.id)
     user_id = _trusted_callback(callback)
@@ -389,7 +415,32 @@ async def handle_paywall_callback(
         chat_id=callback.message.chat.id,
         user_id=user_id,
         session_factory=session_factory,
+        payment_service=payment_service,
     )
+
+
+async def _create_intro_checkout_url(
+    *,
+    payment_service: PaymentProcessor | None,
+    user_id: int,
+) -> str | None:
+    """Issue the one-off checkout link used directly by the intro offer button."""
+
+    if payment_service is None or not payment_service.production_available():
+        return None
+    try:
+        _order, url = await payment_service.start_checkout(
+            user_id=user_id,
+            product_id="intro_25",
+            idempotency_key=uuid4().hex,
+        )
+    except PaymentActivationDenied:
+        logger.warning("intro checkout blocked by production gate")
+        return None
+    except Exception:
+        logger.exception("failed to create direct intro checkout")
+        return None
+    return url
 
 
 async def send_paywall(
@@ -398,6 +449,7 @@ async def send_paywall(
     chat_id: int,
     user_id: int,
     session_factory: async_sessionmaker[AsyncSession],
+    payment_service: PaymentProcessor | None = None,
 ) -> None:
     """Render the only authenticated entry to product navigation and renewal control."""
 
@@ -411,10 +463,26 @@ async def send_paywall(
             )
             .limit(1)
         )
+    has_intro_recurring_source = (
+        await payment_service.has_active_intro_recurring_source(user_id=user_id)
+        if payment_service is not None
+        else False
+    )
+    intro_checkout_url = (
+        await _create_intro_checkout_url(
+            payment_service=payment_service,
+            user_id=user_id,
+        )
+        if intro_available and not has_intro_recurring_source
+        else None
+    )
     await bot.send_message(
         chat_id,
         "Выберите вариант:",
-        reply_markup=paywall_keyboard(intro_available=intro_available),
+        reply_markup=paywall_keyboard(
+            intro_available=intro_available,
+            intro_checkout_url=intro_checkout_url,
+        ),
     )
     if subscription is not None:
         await bot.send_message(
@@ -422,6 +490,32 @@ async def send_paywall(
             "Автопродление подписки активно.",
             reply_markup=subscription_cancel_keyboard(),
         )
+    if has_intro_recurring_source:
+        await bot.send_message(
+            chat_id,
+            "Автосписания по 25 ₽ за генерацию активны.",
+            reply_markup=intro_recurring_cancel_keyboard(),
+        )
+
+
+async def handle_billing_command(
+    message: Message,
+    *,
+    bot: Bot,
+    session_factory: async_sessionmaker[AsyncSession],
+    payment_service: PaymentProcessor | None = None,
+) -> None:
+    """Open the authenticated billing and subscription-management screen."""
+
+    if not _trusted_private_message(message) or message.from_user is None:
+        return
+    await send_paywall(
+        bot,
+        chat_id=message.chat.id,
+        user_id=message.from_user.id,
+        session_factory=session_factory,
+        payment_service=payment_service,
+    )
 
 
 async def handle_billing_navigation(
@@ -429,6 +523,7 @@ async def handle_billing_navigation(
     *,
     bot: Bot,
     session_factory: async_sessionmaker[AsyncSession],
+    payment_service: PaymentProcessor | None,
     screen: str,
 ) -> None:
     await bot.answer_callback_query(callback.id)
@@ -442,11 +537,32 @@ async def handle_billing_navigation(
     else:
         async with session_factory() as session:
             intro_available = await _intro_available(session, user_id)
+        has_intro_recurring_source = (
+            await payment_service.has_active_intro_recurring_source(user_id=user_id)
+            if payment_service is not None
+            else False
+        )
+        intro_checkout_url = (
+            await _create_intro_checkout_url(
+                payment_service=payment_service,
+                user_id=user_id,
+            )
+            if intro_available and not has_intro_recurring_source
+            else None
+        )
         text, keyboard = (
             "Выберите вариант:",
-            paywall_keyboard(intro_available=intro_available),
+            paywall_keyboard(
+                intro_available=intro_available,
+                intro_checkout_url=intro_checkout_url,
+            ),
         )
-    await bot.send_message(callback.message.chat.id, text, reply_markup=keyboard)
+    await bot.edit_message_text(
+        chat_id=callback.message.chat.id,
+        message_id=callback.message.message_id,
+        text=text,
+        reply_markup=keyboard,
+    )
 
 
 async def _send_checkout(
@@ -480,9 +596,9 @@ async def _send_checkout(
         return
     await bot.send_message(
         callback.message.chat.id,
-        "Перейдите к безопасной оплате:",
+        "Перейдите к оплате",
         reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=url)]]
+            inline_keyboard=[[InlineKeyboardButton(text="💳 Оплатить", url=url)]]
         ),
     )
 
@@ -492,11 +608,40 @@ async def handle_billing_product(
 ) -> None:
     await bot.answer_callback_query(callback.id)
     product_id = (callback.data or "")[len(BILLING_PRODUCT_PREFIX) :]
-    if _trusted_callback(callback) is None or callback.message is None:
+    user_id = _trusted_callback(callback)
+    if user_id is None or callback.message is None:
         return
     try:
         product = get_product(product_id)
     except ValueError:
+        return
+    if (
+        product.kind is ProductKind.INTRO
+        and await payment_service.has_active_intro_recurring_source(user_id=user_id)
+    ):
+        try:
+            order = await payment_service.start_intro_recurring_charge(user_id=user_id)
+        except PaymentActivationDenied:
+            await bot.send_message(callback.message.chat.id, PAYMENTS_UNAVAILABLE_COPY)
+            return
+        except Exception:
+            logger.exception("intro recurring charge failed")
+            await bot.send_message(
+                callback.message.chat.id,
+                "Не удалось списать 25 ₽. Попробуйте ещё раз позже.",
+            )
+            return
+        if order is None:
+            await bot.send_message(
+                callback.message.chat.id,
+                "Платёж уже обрабатывается или предложение больше недоступно.",
+            )
+            return
+        await bot.send_message(
+            callback.message.chat.id,
+            "Производим оплату. Генерация будет начислена после подтверждения "
+            "оплаты от банка.",
+        )
         return
     if product.kind is ProductKind.MONTHLY:
         amount = product.amount_kopecks // 100 if product.amount_kopecks else 0
@@ -504,12 +649,12 @@ async def handle_billing_product(
             callback.message.chat.id,
             f"{amount:,} ₽ в месяц. Нажимая кнопку ниже, вы соглашаетесь на "
             "автоматическое ежемесячное списание этой суммы. Отменить "
-            "автопродление можно в любой момент.",
+            "автопродление можно в любой момент по команде /billing",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="Согласен на автопродление",
+                            text="✅ Согласен на автопродление",
                             callback_data=f"{BILLING_CONSENT_PREFIX}{product.id.value}",
                         )
                     ]
@@ -570,7 +715,7 @@ async def handle_ultima(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="Связаться с менеджером",
+                        text="💬 Связаться с менеджером",
                         url=settings.ultima_manager_contact_url,
                     )
                 ]
@@ -607,6 +752,23 @@ async def handle_subscription_cancel(
         callback.message.chat.id,
         "Автопродление отключено. Купленные пакеты генераций сохранены.",
     )
+
+
+async def handle_intro_recurring_cancel(
+    callback: CallbackQuery,
+    *,
+    bot: Bot,
+    payment_service: PaymentProcessor,
+) -> None:
+    await bot.answer_callback_query(callback.id)
+    user_id = _trusted_callback(callback)
+    if user_id is None or callback.message is None:
+        return
+    if await payment_service.cancel_intro_recurring_source(user_id=user_id):
+        await bot.send_message(
+            callback.message.chat.id,
+            "Автосписания по 25 ₽ отключены.",
+        )
 
 
 def custom_color_structure_keyboard() -> InlineKeyboardMarkup:
@@ -655,6 +817,7 @@ async def handle_start_message(
     command: CommandObject | None = None,
     pending_uploads: CustomColorUploads | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    payment_service: PaymentProcessor | None = None,
 ) -> None:
     if not _trusted_private_message(message):
         return
@@ -672,14 +835,11 @@ async def handle_start_message(
     if command is not None and command.args == "billing":
         if session_factory is None:
             raise RuntimeError("session factory is required for a billing launch")
-        sender = message.from_user
-        if sender is None:
-            return
-        await send_paywall(
-            bot,
-            chat_id=message.chat.id,
-            user_id=sender.id,
+        await handle_billing_command(
+            message,
+            bot=bot,
             session_factory=session_factory,
+            payment_service=payment_service,
         )
         return
     if command is not None and command.args == "open_app":
@@ -688,7 +848,9 @@ async def handle_start_message(
         await bot.send_message(
             message.chat.id,
             OPEN_APP_COPY,
-            reply_markup=palette_keyboard(text="Открыть приложение", settings=settings),
+            reply_markup=palette_keyboard(
+                text="🚀 Открыть приложение", settings=settings
+            ),
         )
         return
     await bot.send_message(message.chat.id, NO_SOURCE_COPY)
@@ -924,7 +1086,7 @@ async def handle_custom_color_message(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="Запустить генерацию с этим цветом",
+                        text="✨ Запустить генерацию с этим цветом",
                         callback_data=f"{CUSTOM_COLOR_GENERATE_PREFIX}{selection_id}",
                     )
                 ]
@@ -1050,7 +1212,7 @@ async def handle_replace_photo_cancel_callback(
     await bot.send_message(
         message.chat.id,
         WINNING_SOURCE_COPY,
-        reply_markup=palette_keyboard(text="Выбрать цвет", settings=settings),
+        reply_markup=palette_keyboard(text="🎨 Выбрать цвет", settings=settings),
     )
 
 
@@ -1129,25 +1291,40 @@ def create_router(
     @router.callback_query(F.data == PAYWALL_CALLBACK_DATA)
     async def paywall_handler(callback: CallbackQuery, bot: Bot) -> None:
         await handle_paywall_callback(
-            callback, bot=bot, session_factory=session_factory
+            callback,
+            bot=bot,
+            session_factory=session_factory,
+            payment_service=payment_service,
         )
 
     @router.callback_query(F.data == PACKAGES_CALLBACK_DATA)
     async def packages_handler(callback: CallbackQuery, bot: Bot) -> None:
         await handle_billing_navigation(
-            callback, bot=bot, session_factory=session_factory, screen="packages"
+            callback,
+            bot=bot,
+            session_factory=session_factory,
+            payment_service=payment_service,
+            screen="packages",
         )
 
     @router.callback_query(F.data == MONTHLY_CALLBACK_DATA)
     async def monthly_handler(callback: CallbackQuery, bot: Bot) -> None:
         await handle_billing_navigation(
-            callback, bot=bot, session_factory=session_factory, screen="monthly"
+            callback,
+            bot=bot,
+            session_factory=session_factory,
+            payment_service=payment_service,
+            screen="monthly",
         )
 
     @router.callback_query(F.data == BILLING_BACK_CALLBACK_DATA)
     async def billing_back_handler(callback: CallbackQuery, bot: Bot) -> None:
         await handle_billing_navigation(
-            callback, bot=bot, session_factory=session_factory, screen="back"
+            callback,
+            bot=bot,
+            session_factory=session_factory,
+            payment_service=payment_service,
+            screen="back",
         )
 
     @router.callback_query(F.data == ULTIMA_CALLBACK_DATA)
@@ -1161,6 +1338,15 @@ def create_router(
         await handle_subscription_cancel(
             callback, bot=bot, session_factory=session_factory
         )
+
+    @router.callback_query(F.data == BILLING_CANCEL_INTRO_RECURRING_CALLBACK_DATA)
+    async def intro_recurring_cancel_handler(callback: CallbackQuery, bot: Bot) -> None:
+        if payment_service is not None:
+            await handle_intro_recurring_cancel(
+                callback,
+                bot=bot,
+                payment_service=payment_service,
+            )
 
     @router.callback_query(F.data.startswith(BILLING_CONSENT_PREFIX))
     async def billing_consent_handler(callback: CallbackQuery, bot: Bot) -> None:
@@ -1252,6 +1438,16 @@ def create_router(
             command=command,
             pending_uploads=pending_custom_color_uploads,
             session_factory=session_factory,
+            payment_service=payment_service,
+        )
+
+    @router.message(Command("billing"), F.chat.type == ChatType.PRIVATE)
+    async def billing_command_handler(message: Message, bot: Bot) -> None:
+        await handle_billing_command(
+            message,
+            bot=bot,
+            session_factory=session_factory,
+            payment_service=payment_service,
         )
 
     @router.message(
