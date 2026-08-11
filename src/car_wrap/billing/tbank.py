@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,7 @@ from car_wrap.config import AppSettings
 from car_wrap.eval.report import EvaluationReport
 
 _TIMEOUT = httpx.Timeout(connect=10.0, read=20.0, write=10.0, pool=10.0)
+logger = logging.getLogger(__name__)
 
 
 class PaymentActivationDenied(RuntimeError):
@@ -38,6 +40,14 @@ class TBankRequestNotSent(TBankProtocolError):
 
 class TBankInitRejected(TBankProtocolError):
     """T-Bank returned a valid, definitive unsuccessful Init response."""
+
+    def __init__(self, error_code: str | int | None = None) -> None:
+        self.error_code = (
+            str(error_code)
+            if isinstance(error_code, (str, int)) and not isinstance(error_code, bool)
+            else None
+        )
+        super().__init__()
 
 
 class TBankOutcomeAmbiguous(TBankProtocolError):
@@ -175,7 +185,14 @@ class TBankClient:
         if not isinstance(data, dict):
             raise TBankOutcomeAmbiguous
         if data.get("Success") is not True:
-            raise TBankInitRejected
+            error_code = data.get("ErrorCode")
+            if not isinstance(error_code, (str, int)) or isinstance(error_code, bool):
+                error_code = None
+            logger.warning(
+                "tbank request rejected",
+                extra={"method": method, "error_code": error_code},
+            )
+            raise TBankInitRejected(error_code)
         return data
 
     async def init_payment(
@@ -194,7 +211,6 @@ class TBankClient:
             "OrderId": order_id,
             "Description": description,
             "CustomerKey": customer_key,
-            "Currency": "RUB",
             "NotificationURL": self._settings.tbank_notification_url,
             "SuccessURL": self._settings.tbank_success_url,
             "FailURL": self._settings.tbank_fail_url,

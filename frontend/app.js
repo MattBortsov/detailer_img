@@ -374,7 +374,8 @@ function render() {
     "submission_limited",
     "allowance_required",
   ].includes(state.view);
-  elements.openBilling.hidden = state.view !== "allowance_required";
+  elements.openBilling.hidden =
+    state.view !== "allowance_required" || state.billingChatUrl === null;
   elements.alert.textContent =
     state.view === "selection_stale"
       ? "Этот цвет больше недоступен. Выберите другой."
@@ -898,11 +899,7 @@ async function submitSelectedChoice() {
       const billingUrl = trustedBotUrl(
         response.headers.get("X-Billing-Chat-Url"),
       );
-      if (billingUrl) {
-        state = completeSubmission(state, "allowance_required", billingUrl);
-      } else {
-        state = completeSubmission(state, "failed");
-      }
+      state = completeSubmission(state, "allowance_required", billingUrl);
     } else if (response.status === 409 || response.status === 429) {
       const payload = await response.json();
       const code =
@@ -926,6 +923,9 @@ async function submitSelectedChoice() {
     }
   }
   render();
+  if (state.view === "allowance_required") {
+    elements.alert.scrollIntoView({block: "center", behavior: "smooth"});
+  }
 }
 
 async function requestCustomColorPrompt() {

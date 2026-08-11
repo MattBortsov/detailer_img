@@ -93,6 +93,9 @@ class PaymentService:
                 description=f"Car Wrap: {product.id.value}",
                 customer_key=str(user_id),
                 recurrent=product.kind is ProductKind.MONTHLY,
+                operation_initiator_type=(
+                    "0" if product.kind is ProductKind.MONTHLY else None
+                ),
             )
         except (PaymentActivationDenied, TBankRequestNotSent, TBankInitRejected):
             await self._mark_init_failed(provider_order_id)
