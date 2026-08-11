@@ -13,6 +13,7 @@ from car_wrap.api.dependencies import (
     require_mini_app_session,
 )
 from car_wrap.api.schemas import JobAcceptedOut, SelectionValidationIn
+from car_wrap.bot.router import send_paywall
 from car_wrap.jobs.contracts import AcceptanceErrorCode, JobAcceptanceError
 
 router = APIRouter(prefix="/api/v1", tags=["jobs"])
@@ -78,6 +79,18 @@ async def accept_job(
         )
     except JobAcceptanceError as error:
         status_code, message = _ERRORS[error.code]
+        if error.code is AcceptanceErrorCode.ALLOWANCE_REQUIRED:
+            bot = request.app.state.telegram_bot
+            if bot is not None:
+                try:
+                    await send_paywall(
+                        bot,
+                        chat_id=current.telegram_user_id,
+                        user_id=current.telegram_user_id,
+                        session_factory=request.app.state.session_factory,
+                    )
+                except Exception:
+                    pass
         headers = (
             {"X-Billing-Chat-Url": request.app.state.settings.billing_chat_url}
             if error.code is AcceptanceErrorCode.ALLOWANCE_REQUIRED
