@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
@@ -28,6 +29,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from car_wrap.billing.catalog import get_product
 from car_wrap.billing.contracts import ProductKind
 from car_wrap.billing.repository import BillingRepository
+from car_wrap.billing.tbank import (
+    PaymentActivationDenied,
+    TBankInitRejected,
+    TBankRequestNotSent,
+)
 from car_wrap.bot.delivery import MENU_CALLBACK_DATA
 from car_wrap.bot.media import (
     MediaRejection,
@@ -101,6 +107,7 @@ ULTIMA_COPY = (
     "Свяжитесь с менеджером, чтобы узнать стоимость конкретно для вашего бизнеса."
 )
 PAYMENTS_UNAVAILABLE_COPY = "Оплата сейчас недоступна. Попробуйте позже."
+logger = logging.getLogger(__name__)
 
 
 class UserTrackingMiddleware(BaseMiddleware):
@@ -467,7 +474,22 @@ async def _send_checkout(
             idempotency_key=uuid4().hex,
             recurring_consent_at=consented_at,
         )
+    except TBankInitRejected as error:
+        logger.warning(
+            "checkout rejected by tbank", extra={"error_code": error.error_code}
+        )
+        await bot.send_message(callback.message.chat.id, PAYMENTS_UNAVAILABLE_COPY)
+        return
+    except TBankRequestNotSent:
+        logger.warning("checkout request did not reach tbank")
+        await bot.send_message(callback.message.chat.id, PAYMENTS_UNAVAILABLE_COPY)
+        return
+    except PaymentActivationDenied:
+        logger.warning("checkout blocked by production gate")
+        await bot.send_message(callback.message.chat.id, PAYMENTS_UNAVAILABLE_COPY)
+        return
     except Exception:
+        logger.exception("checkout failed before tbank confirmation")
         await bot.send_message(callback.message.chat.id, PAYMENTS_UNAVAILABLE_COPY)
         return
     await bot.send_message(

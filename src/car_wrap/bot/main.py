@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import httpx
 from aiogram import Bot, Dispatcher
@@ -70,6 +71,7 @@ async def run_polling(settings: AppSettings) -> None:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO)
     asyncio.run(run_polling(AppSettings.from_environment()))
 
 
