@@ -44,40 +44,22 @@ class BillingRepository:
     async def intro_offer_available(
         self, session: AsyncSession, *, user_id: int
     ) -> bool:
-        """Return whether fewer than three active intro purchases occupy slots.
+        """The single-generation product remains available without a cap."""
 
-        Pending orders reserve capacity until they are definitively rejected or
-        reconciled. Failed/cancelled orders remain auditable but release their
-        numbered slot for a safe retry.
-        """
+        del session, user_id
+        return True
 
-        occupied = await session.scalar(
-            select(func.count(BillingOrder.id)).where(
+    async def next_intro_number(self, session: AsyncSession, *, user_id: int) -> int:
+        """Choose the next audit sequence number under the account lock."""
+
+        latest = await session.scalar(
+            select(func.max(BillingOrder.intro_number)).where(
                 BillingOrder.telegram_user_id == user_id,
                 BillingOrder.product_id == "intro_25",
                 BillingOrder.status.in_(("pending", "confirmed")),
             )
         )
-        return int(occupied or 0) < 3
-
-    async def next_intro_number(self, session: AsyncSession, *, user_id: int) -> int:
-        """Choose the first free active slot while the caller holds account lock."""
-
-        occupied = set(
-            (
-                await session.scalars(
-                    select(BillingOrder.intro_number).where(
-                        BillingOrder.telegram_user_id == user_id,
-                        BillingOrder.product_id == "intro_25",
-                        BillingOrder.status.in_(("pending", "confirmed")),
-                    )
-                )
-            ).all()
-        )
-        for number in range(1, 4):
-            if number not in occupied:
-                return number
-        raise ValueError("introductory purchases are exhausted")
+        return int(latest or 0) + 1
 
     def payable_product(self, product_id: str) -> Product:
         """Resolve price and allowance only from the immutable local catalog."""

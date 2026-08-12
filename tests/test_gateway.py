@@ -33,6 +33,7 @@ from car_wrap.config import AppSettings
 from car_wrap.db.models import (
     AllowanceBalance,
     BillingOrder,
+    IntroRecurringChargeSource,
     RobokassaPayment,
     Subscription,
 )
@@ -231,8 +232,9 @@ class _Repository:
 
 
 class _GrantSession:
-    def __init__(self) -> None:
+    def __init__(self, scalar_values: list[object] | None = None) -> None:
         self.added: list[object] = []
+        self.scalar_values = scalar_values or []
 
     def add(self, entity: object) -> None:
         if isinstance(entity, (AllowanceBalance, Subscription)) and entity.id is None:
@@ -241,6 +243,9 @@ class _GrantSession:
 
     async def flush(self) -> None:
         return None
+
+    async def scalar(self, _statement: object) -> object:
+        return self.scalar_values.pop(0)
 
 
 class _GrantRepository:
@@ -294,6 +299,59 @@ async def test_initial_monthly_result_persists_parent_invoice_and_grants() -> No
     assert len(subscriptions) == 1
     assert subscriptions[0].robokassa_parent_invoice_id == 42
     assert len(repository.entries) == 2
+
+
+@pytest.mark.asyncio
+async def test_other_card_replaces_saved_intro_source_and_grants() -> None:
+    now = datetime.now(UTC)
+    order = BillingOrder(
+        id=uuid4(),
+        telegram_user_id=123,
+        product_id="intro_25",
+        amount_kopecks=2_500,
+        intro_number=4,
+        currency="RUB",
+        status="confirmed",
+        idempotency_key="other-card",
+    )
+    payment = RobokassaPayment(
+        id=uuid4(),
+        order_id=order.id,
+        invoice_id=84,
+        previous_invoice_id=None,
+        status="confirmed",
+    )
+    previous_source = IntroRecurringChargeSource(
+        id=uuid4(),
+        telegram_user_id=123,
+        source_order_id=uuid4(),
+        parent_invoice_id=42,
+        amount_kopecks=2_500,
+        status="active",
+    )
+    repository = _GrantRepository()
+    service = PaymentService(
+        lambda: None,  # type: ignore[arg-type,return-value]
+        PaymentGatewayClient(_settings()),
+        repository=repository,  # type: ignore[arg-type]
+    )
+    session = _GrantSession([previous_source])
+
+    await service._grant_purchase(
+        session,  # type: ignore[arg-type]
+        order,
+        payment,
+        get_payable_product("intro_25"),
+        now,
+    )
+
+    sources = [
+        item for item in session.added if isinstance(item, IntroRecurringChargeSource)
+    ]
+    assert previous_source.status == "cancelled"
+    assert previous_source.cancelled_at == now
+    assert len(sources) == 1
+    assert sources[0].parent_invoice_id == 84
 
 
 @pytest.mark.asyncio

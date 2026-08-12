@@ -853,7 +853,7 @@ class BillingOrder(Base):
             name="status_supported",
         ),
         CheckConstraint(
-            "(product_id = 'intro_25' AND intro_number BETWEEN 1 AND 3) OR "
+            "(product_id = 'intro_25' AND intro_number > 0) OR "
             "(product_id <> 'intro_25' AND intro_number IS NULL)",
             name="intro_number_matches_product",
         ),

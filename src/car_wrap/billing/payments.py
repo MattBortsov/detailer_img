@@ -69,29 +69,55 @@ class PaymentService:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._repository.lock_account(session, user_id=user_id)
-                intro_number = await self._next_intro_number(
-                    session,
-                    user_id=user_id,
-                    product_kind=product.kind,
-                )
-                order = BillingOrder(
-                    telegram_user_id=user_id,
-                    product_id=product.id.value,
-                    amount_kopecks=amount_kopecks,
-                    intro_number=intro_number,
-                    idempotency_key=idempotency_key,
-                    recurring_consent_at=recurring_consent_at,
-                )
-                session.add(order)
-                await session.flush()
-                session.add(
-                    RobokassaPayment(
-                        order_id=order.id,
-                        invoice_id=None,
-                        previous_invoice_id=None,
-                        status="initializing",
+                order: BillingOrder | None = None
+                if product.kind is ProductKind.INTRO:
+                    order = await session.scalar(
+                        select(BillingOrder)
+                        .join(
+                            RobokassaPayment,
+                            RobokassaPayment.order_id == BillingOrder.id,
+                        )
+                        .where(
+                            BillingOrder.telegram_user_id == user_id,
+                            BillingOrder.product_id == product.id.value,
+                            BillingOrder.status == "pending",
+                            BillingOrder.created_at
+                            >= datetime.now(UTC) - timedelta(hours=1),
+                            RobokassaPayment.status == "pending",
+                            RobokassaPayment.invoice_id.is_not(None),
+                            RobokassaPayment.previous_invoice_id.is_(None),
+                        )
+                        .order_by(BillingOrder.created_at.desc())
+                        .limit(1)
                     )
-                )
+                reused = isinstance(order, BillingOrder)
+                if not reused:
+                    intro_number = await self._next_intro_number(
+                        session,
+                        user_id=user_id,
+                        product_kind=product.kind,
+                    )
+                    order = BillingOrder(
+                        telegram_user_id=user_id,
+                        product_id=product.id.value,
+                        amount_kopecks=amount_kopecks,
+                        intro_number=intro_number,
+                        idempotency_key=idempotency_key,
+                        recurring_consent_at=recurring_consent_at,
+                    )
+                    session.add(order)
+                    await session.flush()
+                    session.add(
+                        RobokassaPayment(
+                            order_id=order.id,
+                            invoice_id=None,
+                            previous_invoice_id=None,
+                            status="initializing",
+                        )
+                    )
+
+        if order is None:  # pragma: no cover - defensive type narrowing
+            raise PaymentConfirmationError("gateway order is unavailable")
 
         try:
             checkout = await self._gateway.create_checkout(
@@ -105,27 +131,33 @@ class PaymentService:
         except (PaymentGatewayRequestNotSent, PaymentGatewayProtocolError):
             await self._mark_gateway_rejected(order_id=order.id)
             raise
-        await self._record_gateway_invoice(
-            order_id=order.id,
-            invoice_id=checkout.invoice_id,
-            status="pending",
-        )
+        if not reused:
+            await self._record_gateway_invoice(
+                order_id=order.id,
+                invoice_id=checkout.invoice_id,
+                status="pending",
+            )
         return order, checkout.redirect_url
 
-    async def has_active_intro_recurring_source(self, *, user_id: int) -> bool:
+    async def active_intro_recurring_source(
+        self, *, user_id: int
+    ) -> IntroRecurringChargeSource | None:
         async with self._session_factory() as session:
             source = await session.scalar(
-                select(IntroRecurringChargeSource.id)
+                select(IntroRecurringChargeSource)
                 .where(
                     IntroRecurringChargeSource.telegram_user_id == user_id,
                     IntroRecurringChargeSource.status == "active",
                 )
                 .limit(1)
             )
-        return source is not None
+        return source if isinstance(source, IntroRecurringChargeSource) else None
+
+    async def has_active_intro_recurring_source(self, *, user_id: int) -> bool:
+        return await self.active_intro_recurring_source(user_id=user_id) is not None
 
     async def start_intro_recurring_charge(
-        self, *, user_id: int
+        self, *, user_id: int, source_id: UUID
     ) -> BillingOrder | None:
         """Create one user-triggered 25 ₽ charge without opening a payment page."""
 
@@ -138,6 +170,7 @@ class PaymentService:
                     select(IntroRecurringChargeSource)
                     .where(
                         IntroRecurringChargeSource.telegram_user_id == user_id,
+                        IntroRecurringChargeSource.id == source_id,
                         IntroRecurringChargeSource.status == "active",
                     )
                     .with_for_update()
@@ -146,11 +179,16 @@ class PaymentService:
                     return None
                 parent_invoice_id = source.parent_invoice_id
                 pending_charge = await session.scalar(
-                    select(BillingOrder.id)
+                    select(RobokassaPayment.id)
+                    .join(BillingOrder, BillingOrder.id == RobokassaPayment.order_id)
                     .where(
                         BillingOrder.telegram_user_id == user_id,
                         BillingOrder.product_id == product.id.value,
                         BillingOrder.status == "pending",
+                        RobokassaPayment.previous_invoice_id.is_not(None),
+                        RobokassaPayment.status.in_(
+                            ("initializing", "pending", "submitted")
+                        ),
                     )
                     .limit(1)
                 )
@@ -310,16 +348,11 @@ class PaymentService:
         user_id: int,
         product_kind: ProductKind,
     ) -> int | None:
-        """Allocate the next 1..3 introduction slot under the account lock."""
+        """Allocate the next introduction audit number under the account lock."""
 
         if product_kind is not ProductKind.INTRO:
             return None
-        try:
-            return await self._repository.next_intro_number(session, user_id=user_id)
-        except ValueError as exc:
-            raise PaymentConfirmationError(
-                "introductory purchases are exhausted"
-            ) from exc
+        return await self._repository.next_intro_number(session, user_id=user_id)
 
     async def _payment_for_order(
         self,
@@ -558,15 +591,25 @@ class PaymentService:
                 raise PaymentConfirmationError
             if payment.previous_invoice_id is None:
                 active_source = await session.scalar(
-                    select(IntroRecurringChargeSource.id)
+                    select(IntroRecurringChargeSource)
                     .where(
                         IntroRecurringChargeSource.telegram_user_id
                         == order.telegram_user_id,
                         IntroRecurringChargeSource.status == "active",
                     )
+                    .with_for_update()
                     .limit(1)
                 )
-                if active_source is None:
+                if (
+                    isinstance(active_source, IntroRecurringChargeSource)
+                    and active_source.parent_invoice_id != payment.invoice_id
+                ):
+                    active_source.status = "cancelled"
+                    active_source.cancelled_at = now
+                if (
+                    active_source is None
+                    or active_source.parent_invoice_id != payment.invoice_id
+                ):
                     session.add(
                         IntroRecurringChargeSource(
                             telegram_user_id=order.telegram_user_id,

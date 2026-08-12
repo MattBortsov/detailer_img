@@ -100,6 +100,7 @@ BILLING_PRODUCT_PREFIX = "billing:product:"
 BILLING_CONSENT_PREFIX = "billing:consent:"
 BILLING_CANCEL_CALLBACK_DATA = "billing:cancel"
 BILLING_CANCEL_INTRO_RECURRING_CALLBACK_DATA = "billing:cancel_intro_recurring"
+BILLING_INTRO_SAVED_PREFIX = "billing:intro_saved:"
 ULTIMA_COPY = (
     "Свяжитесь с менеджером, чтобы узнать стоимость конкретно для вашего бизнеса."
 )
@@ -317,12 +318,40 @@ def intro_recurring_cancel_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="⛔ Отключить автосписания 25 ₽",
+                    text="🗑 Удалить сохранённую карту",
                     callback_data=BILLING_CANCEL_INTRO_RECURRING_CALLBACK_DATA,
                 )
             ]
         ]
     )
+
+
+def intro_card_keyboard(
+    *,
+    source_id: UUID,
+    other_checkout_url: str | None,
+) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text="💳 Сохранённая карта",
+                callback_data=f"{BILLING_INTRO_SAVED_PREFIX}{source_id}",
+            )
+        ]
+    ]
+    if other_checkout_url is not None:
+        rows.append(
+            [InlineKeyboardButton(text="💳 Другая карта", url=other_checkout_url)]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="← Назад",
+                callback_data=BILLING_BACK_CALLBACK_DATA,
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def package_keyboard(
@@ -439,7 +468,7 @@ async def _create_checkout_url(
     except Exception:
         logger.exception("failed to create direct checkout")
         return None
-    return url
+    return str(url)
 
 
 async def send_paywall(
@@ -462,19 +491,26 @@ async def send_paywall(
             )
             .limit(1)
         )
-    has_intro_recurring_source = (
-        await payment_service.has_active_intro_recurring_source(user_id=user_id)
+    intro_source = (
+        await payment_service.active_intro_recurring_source(user_id=user_id)
         if payment_service is not None
-        else False
+        else None
+    )
+    intro_checkout_url = (
+        await _create_checkout_url(
+            payment_service=payment_service,
+            user_id=user_id,
+            product_id="intro_25",
+        )
+        if intro_source is None
+        else None
     )
     await bot.send_message(
         chat_id,
         "Выберите вариант:",
         reply_markup=paywall_keyboard(
             intro_available=intro_available,
-            # Creating an order while merely rendering the paywall reserves an
-            # intro slot. Create it only after the user presses the product.
-            intro_checkout_url=None,
+            intro_checkout_url=intro_checkout_url,
         ),
     )
     if subscription is not None:
@@ -483,10 +519,10 @@ async def send_paywall(
             "Автопродление подписки активно.",
             reply_markup=subscription_cancel_keyboard(),
         )
-    if has_intro_recurring_source:
+    if intro_source is not None:
         await bot.send_message(
             chat_id,
-            "Автосписания по 25 ₽ за генерацию активны.",
+            "Для быстрых покупок доступна сохранённая карта.",
             reply_markup=intro_recurring_cancel_keyboard(),
         )
 
@@ -546,10 +582,10 @@ async def handle_billing_navigation(
     else:
         async with session_factory() as session:
             intro_available = await _intro_available(session, user_id)
-        has_intro_recurring_source = (
-            await payment_service.has_active_intro_recurring_source(user_id=user_id)
+        intro_source = (
+            await payment_service.active_intro_recurring_source(user_id=user_id)
             if payment_service is not None
-            else False
+            else None
         )
         intro_checkout_url = (
             await _create_checkout_url(
@@ -557,7 +593,7 @@ async def handle_billing_navigation(
                 user_id=user_id,
                 product_id="intro_25",
             )
-            if intro_available and not has_intro_recurring_source
+            if intro_available and intro_source is None
             else None
         )
         text, keyboard = (
@@ -625,32 +661,29 @@ async def handle_billing_product(
         product = get_product(product_id)
     except ValueError:
         return
-    if (
-        product.kind is ProductKind.INTRO
-        and await payment_service.has_active_intro_recurring_source(user_id=user_id)
-    ):
-        try:
-            order = await payment_service.start_intro_recurring_charge(user_id=user_id)
-        except PaymentActivationDenied:
-            await bot.send_message(callback.message.chat.id, PAYMENTS_UNAVAILABLE_COPY)
-            return
-        except Exception:
-            logger.exception("intro recurring charge failed")
-            await bot.send_message(
-                callback.message.chat.id,
-                "Не удалось списать 25 ₽. Попробуйте ещё раз позже.",
+    if product.kind is ProductKind.INTRO:
+        source = await payment_service.active_intro_recurring_source(user_id=user_id)
+        if source is None:
+            await _send_checkout(
+                callback,
+                bot=bot,
+                payment_service=payment_service,
+                product_id=product.id.value,
+                consented_at=None,
             )
             return
-        if order is None:
-            await bot.send_message(
-                callback.message.chat.id,
-                "Платёж уже обрабатывается или предложение больше недоступно.",
-            )
-            return
+        other_checkout_url = await _create_checkout_url(
+            payment_service=payment_service,
+            user_id=user_id,
+            product_id=product.id.value,
+        )
         await bot.send_message(
             callback.message.chat.id,
-            "Производим оплату. Генерация будет начислена после подтверждения "
-            "оплаты от банка.",
+            "Выберите карту для оплаты:",
+            reply_markup=intro_card_keyboard(
+                source_id=source.id,
+                other_checkout_url=other_checkout_url,
+            ),
         )
         return
     if product.kind is ProductKind.MONTHLY:
@@ -678,6 +711,50 @@ async def handle_billing_product(
         payment_service=payment_service,
         product_id=product.id.value,
         consented_at=None,
+    )
+
+
+async def handle_intro_saved_card(
+    callback: CallbackQuery,
+    *,
+    bot: Bot,
+    payment_service: PaymentProcessor,
+) -> None:
+    await bot.answer_callback_query(callback.id)
+    user_id = _trusted_callback(callback)
+    if user_id is None or callback.message is None:
+        return
+    try:
+        source_id = UUID(
+            (callback.data or "")[len(BILLING_INTRO_SAVED_PREFIX) :]
+        )
+    except ValueError:
+        return
+    try:
+        order = await payment_service.start_intro_recurring_charge(
+            user_id=user_id,
+            source_id=source_id,
+        )
+    except PaymentActivationDenied:
+        await bot.send_message(callback.message.chat.id, PAYMENTS_UNAVAILABLE_COPY)
+        return
+    except Exception:
+        logger.exception("intro recurring charge failed")
+        await bot.send_message(
+            callback.message.chat.id,
+            "Не удалось списать 25 ₽. Попробуйте ещё раз позже.",
+        )
+        return
+    if order is None:
+        await bot.send_message(
+            callback.message.chat.id,
+            "Платёж уже обрабатывается или сохранённая карта недоступна.",
+        )
+        return
+    await bot.send_message(
+        callback.message.chat.id,
+        "Производим оплату. Генерация будет начислена после подтверждения "
+        "оплаты от банка.",
     )
 
 
@@ -777,7 +854,7 @@ async def handle_intro_recurring_cancel(
     if await payment_service.cancel_intro_recurring_source(user_id=user_id):
         await bot.send_message(
             callback.message.chat.id,
-            "Автосписания по 25 ₽ отключены.",
+            "Сохранённая карта удалена из вариантов оплаты.",
         )
 
 
@@ -1363,6 +1440,15 @@ def create_router(
         if payment_service is not None:
             await handle_monthly_consent(
                 callback, bot=bot, payment_service=payment_service
+            )
+
+    @router.callback_query(F.data.startswith(BILLING_INTRO_SAVED_PREFIX))
+    async def intro_saved_card_handler(callback: CallbackQuery, bot: Bot) -> None:
+        if payment_service is not None:
+            await handle_intro_saved_card(
+                callback,
+                bot=bot,
+                payment_service=payment_service,
             )
 
     @router.callback_query(F.data.startswith(BILLING_PRODUCT_PREFIX))
