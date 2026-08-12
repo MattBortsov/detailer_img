@@ -14,6 +14,7 @@ from fastapi import (
     Response,
     status,
 )
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from car_wrap.api.dependencies import (
@@ -62,6 +63,7 @@ async def _send_paywall_safely(
     chat_id: int,
     user_id: int,
     session_factory: async_sessionmaker[AsyncSession],
+    payment_service: object | None,
 ) -> None:
     try:
         await send_paywall(
@@ -69,6 +71,7 @@ async def _send_paywall_safely(
             chat_id=chat_id,
             user_id=user_id,
             session_factory=session_factory,
+            payment_service=payment_service,
         )
     except Exception:
         return
@@ -86,7 +89,7 @@ async def accept_job(
     payload: SelectionValidationIn,
     current: CurrentSession,
     session: DatabaseSession,
-) -> JobAcceptedOut:
+) -> JobAcceptedOut | JSONResponse:
     if request.query_params:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -116,16 +119,23 @@ async def accept_job(
                     chat_id=current.telegram_user_id,
                     user_id=current.telegram_user_id,
                     session_factory=request.app.state.session_factory,
+                    payment_service=request.app.state.payment_service,
                 )
-        headers = (
-            {"X-Billing-Chat-Url": request.app.state.settings.billing_chat_url}
-            if error.code is AcceptanceErrorCode.ALLOWANCE_REQUIRED
-            else None
-        )
+            return JSONResponse(
+                status_code=status_code,
+                content={
+                    "detail": {"code": error.code.value, "message": message}
+                },
+                headers={
+                    "X-Billing-Chat-Url": (
+                        request.app.state.settings.billing_chat_url
+                    )
+                },
+                background=background_tasks,
+            )
         raise HTTPException(
             status_code=status_code,
             detail={"code": error.code.value, "message": message},
-            headers=headers,
         ) from None
     response.headers["Cache-Control"] = "no-store"
     settings = request.app.state.settings
