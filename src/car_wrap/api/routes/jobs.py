@@ -4,8 +4,17 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from aiogram import Bot
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from car_wrap.api.dependencies import (
     CurrentMiniAppSession,
@@ -47,6 +56,24 @@ _ERRORS: dict[AcceptanceErrorCode, tuple[int, str]] = {
 }
 
 
+async def _send_paywall_safely(
+    bot: Bot,
+    *,
+    chat_id: int,
+    user_id: int,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    try:
+        await send_paywall(
+            bot,
+            chat_id=chat_id,
+            user_id=user_id,
+            session_factory=session_factory,
+        )
+    except Exception:
+        return
+
+
 @router.post(
     "/jobs",
     response_model=JobAcceptedOut,
@@ -55,6 +82,7 @@ _ERRORS: dict[AcceptanceErrorCode, tuple[int, str]] = {
 async def accept_job(
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     payload: SelectionValidationIn,
     current: CurrentSession,
     session: DatabaseSession,
@@ -82,15 +110,13 @@ async def accept_job(
         if error.code is AcceptanceErrorCode.ALLOWANCE_REQUIRED:
             bot = request.app.state.telegram_bot
             if bot is not None:
-                try:
-                    await send_paywall(
-                        bot,
-                        chat_id=current.telegram_user_id,
-                        user_id=current.telegram_user_id,
-                        session_factory=request.app.state.session_factory,
-                    )
-                except Exception:
-                    pass
+                background_tasks.add_task(
+                    _send_paywall_safely,
+                    bot,
+                    chat_id=current.telegram_user_id,
+                    user_id=current.telegram_user_id,
+                    session_factory=request.app.state.session_factory,
+                )
         headers = (
             {"X-Billing-Chat-Url": request.app.state.settings.billing_chat_url}
             if error.code is AcceptanceErrorCode.ALLOWANCE_REQUIRED

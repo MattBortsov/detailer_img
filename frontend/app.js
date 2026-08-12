@@ -20,6 +20,7 @@ import {
   closeTelegramMiniApp,
   returnToTelegramChat,
 } from "./telegram-navigation.js";
+import {syncAllowanceDialog} from "./allowance-dialog.js";
 
 const HEX_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const BOT_URL_PATTERN =
@@ -43,6 +44,9 @@ const elements = {
   closeSourcePhoto: document.querySelector("#close-source-photo"),
   replaceSourcePhoto: document.querySelector("#replace-source-photo"),
   closeMiniApp: document.querySelector("#close-mini-app"),
+  allowanceDialog: document.querySelector("#allowance-dialog"),
+  allowanceMessage: document.querySelector("#allowance-message"),
+  closeAllowanceDialog: document.querySelector("#close-allowance-dialog"),
   openBilling: document.querySelector("#open-billing"),
   form: document.querySelector("#palette-form"),
   colorsGrid: document.querySelector("#colors-grid"),
@@ -376,18 +380,21 @@ function render() {
     "selection_stale",
     "submit_failed",
     "submission_limited",
-    "allowance_required",
   ].includes(state.view);
-  elements.alert.classList.toggle(
-    "allowance-alert",
-    state.view === "allowance_required",
-  );
-  elements.openBilling.hidden =
-    state.view !== "allowance_required" || state.billingChatUrl === null;
   elements.alert.textContent =
     state.view === "selection_stale"
       ? "Этот цвет больше недоступен. Выберите другой."
       : state.submissionError;
+  const allowanceRequired =
+    state.view === "allowance_required" && state.billingChatUrl !== null;
+  syncAllowanceDialog(
+    {
+      dialog: elements.allowanceDialog,
+      message: elements.allowanceMessage,
+      action: elements.openBilling,
+    },
+    {visible: allowanceRequired, text: state.submissionError},
+  );
 }
 
 function trustedBotUrl(candidate) {
@@ -928,9 +935,6 @@ async function submitSelectedChoice() {
     }
   }
   render();
-  if (state.view === "allowance_required") {
-    elements.alert.scrollIntoView({block: "center", behavior: "smooth"});
-  }
 }
 
 async function requestCustomColorPrompt() {
@@ -998,6 +1002,9 @@ elements.openBilling.addEventListener("click", () => {
     browserWindow: window,
     location: window.location,
   });
+});
+elements.closeAllowanceDialog.addEventListener("click", () => {
+  elements.allowanceDialog.close();
 });
 elements.closeMiniApp.addEventListener("click", () => {
   closeTelegramMiniApp({telegram, browserWindow: window});

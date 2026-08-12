@@ -1014,32 +1014,6 @@ h3 {
   color: #ff9aae;
 }
 
-.inline-alert.allowance-alert {
-  border-color: rgb(255 255 255 / 48%);
-  background: rgb(255 255 255 / 12%);
-  color: var(--color-text);
-  font-size: 17px;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-#open-billing {
-  width: 100%;
-  min-height: 54px;
-  margin-block-start: var(--space-md);
-  border-color: #fff;
-  background: #fff;
-  color: #07080d;
-  font-size: 16px;
-  font-weight: 750;
-}
-
-#open-billing:hover,
-#open-billing:active {
-  border-color: #fff;
-  background: #fff;
-}
-
 .action-bar {
   position: sticky;
   z-index: 5;
@@ -1074,6 +1048,7 @@ h3 {
 
 .add-color-dialog,
 .confirm-color-dialog,
+.allowance-dialog,
 .edit-color-dialog {
   width: min(100% - 24px, 520px);
   max-height: calc(100svh - 24px);
@@ -1087,6 +1062,7 @@ h3 {
 }
 
 .add-color-dialog::backdrop,
+.allowance-dialog::backdrop,
 .confirm-color-dialog::backdrop,
 .edit-color-dialog::backdrop {
   background: rgb(0 0 0 / 72%);
@@ -1094,6 +1070,71 @@ h3 {
 
 .confirm-color-dialog {
   width: min(100% - 24px, 420px);
+}
+
+.allowance-dialog {
+  width: min(100% - 24px, 440px);
+  border: 2px solid rgb(255 255 255 / 55%);
+}
+
+.allowance-dialog-content {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  padding: 36px var(--space-xl) var(--space-xl);
+  text-align: center;
+}
+
+.allowance-dialog-close {
+  position: absolute;
+  top: var(--space-sm);
+  right: var(--space-sm);
+  width: 44px;
+  height: 44px;
+}
+
+.allowance-dialog-mark {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-block-end: var(--space-lg);
+  border: 2px solid rgb(255 255 255 / 60%);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 12%);
+  color: #fff;
+  font-size: 30px;
+  font-weight: 800;
+}
+
+.allowance-dialog h2 {
+  font-size: 26px;
+  line-height: 1.15;
+}
+
+.allowance-dialog p {
+  margin-block-start: var(--space-md);
+  color: var(--color-text);
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+#open-billing {
+  width: 100%;
+  min-height: 56px;
+  margin-block-start: var(--space-xl);
+  border-color: #fff;
+  background: #fff;
+  color: #07080d;
+  font-size: 17px;
+  font-weight: 750;
+}
+
+#open-billing:hover,
+#open-billing:active {
+  border-color: #fff;
+  background: #fff;
 }
 
 .confirm-color-content {

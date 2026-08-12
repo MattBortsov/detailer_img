@@ -163,9 +163,6 @@
 
           <p class="selection-status" id="selection-status" role="status" aria-live="polite"></p>
           <div class="inline-alert" id="inline-alert" role="alert" hidden></div>
-          <button class="secondary-button" id="open-billing" type="button" hidden>
-            Выбрать тариф
-          </button>
           <p class="film-warning">Цвет на экране может отличаться от реальной плёнки.</p>
 
           <div class="action-bar">
@@ -237,6 +234,28 @@
         aria-label="Закрыть фото"
       >×</button>
       <img id="source-photo-full" alt="Выбранное фото для генерации полностью">
+    </dialog>
+
+    <dialog
+      class="allowance-dialog"
+      id="allowance-dialog"
+      aria-labelledby="allowance-title"
+      aria-describedby="allowance-message"
+    >
+      <div class="allowance-dialog-content">
+        <button
+          class="icon-button allowance-dialog-close"
+          id="close-allowance-dialog"
+          type="button"
+          aria-label="Закрыть"
+        >×</button>
+        <span class="allowance-dialog-mark" aria-hidden="true">!</span>
+        <h2 id="allowance-title">Генерации закончились</h2>
+        <p id="allowance-message">
+          Выберите тариф, чтобы продолжить создавать варианты.
+        </p>
+        <button id="open-billing" type="button">Выбрать тариф</button>
+      </div>
     </dialog>
 
     <dialog
