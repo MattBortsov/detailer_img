@@ -16,7 +16,10 @@ import {
   setCatalogLoading,
   setFlipped,
 } from "./state.js";
-import {openTelegramUrl as navigateToTelegramUrl} from "./telegram-navigation.js";
+import {
+  closeTelegramMiniApp,
+  returnToTelegramChat,
+} from "./telegram-navigation.js";
 
 const HEX_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const BOT_URL_PATTERN =
@@ -395,11 +398,15 @@ function trustedBotUrl(candidate) {
 
 function openChat() {
   const url = trustedBotUrl(state.botChatUrl);
-  openTelegramUrl(url);
+  returnToChat(url);
 }
 
-function openTelegramUrl(url) {
-  navigateToTelegramUrl(url, {telegram, location: window.location});
+function returnToChat(url) {
+  returnToTelegramChat(url, {
+    telegram,
+    browserWindow: window,
+    location: window.location,
+  });
 }
 
 async function fetchJson(url, options = {}) {
@@ -485,7 +492,7 @@ elements.replaceSourcePhoto.addEventListener("click", async () => {
     if (!url) {
       throw new Error("Invalid bot URL");
     }
-    openTelegramUrl(url);
+    returnToChat(url);
   } catch {
     if (state.view !== "auth_failed") {
       elements.alert.textContent =
@@ -948,7 +955,7 @@ async function requestCustomColorPrompt() {
     if (!botUrl) {
       throw new Error("Invalid bot URL");
     }
-    openTelegramUrl(botUrl);
+    returnToChat(botUrl);
   } catch {
     if (state.view !== "auth_failed") {
       elements.alert.textContent =
@@ -986,13 +993,15 @@ for (const button of document.querySelectorAll("[data-open-chat]")) {
   button.addEventListener("click", openChat);
 }
 elements.openBilling.addEventListener("click", () => {
-  navigateToTelegramUrl(trustedBotUrl(state.billingChatUrl), {
+  returnToTelegramChat(trustedBotUrl(state.billingChatUrl), {
     telegram,
+    browserWindow: window,
     location: window.location,
-    closeMiniApp: true,
   });
 });
-elements.closeMiniApp.addEventListener("click", () => telegram?.close());
+elements.closeMiniApp.addEventListener("click", () => {
+  closeTelegramMiniApp({telegram, browserWindow: window});
+});
 
 if (telegram) {
   telegram.setHeaderColor?.("#07080D");

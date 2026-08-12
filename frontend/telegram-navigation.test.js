@@ -1,45 +1,81 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {openTelegramUrl} from "./telegram-navigation.js";
+import {
+  closeTelegramMiniApp,
+  returnToTelegramChat,
+} from "./telegram-navigation.js";
 
-test("billing navigation opens the bot and closes the Mini App", () => {
+test("returning to chat closes the Mini App without opening another link", () => {
   const calls = [];
   const telegram = {
     openTelegramLink(url) {
       calls.push(["open", url]);
+    },
+    disableClosingConfirmation() {
+      calls.push(["disable-confirmation"]);
     },
     close() {
       calls.push(["close"]);
     },
   };
 
-  const opened = openTelegramUrl("https://t.me/detailer_img_bot?start=billing", {
-    telegram,
-    location: {assign() {}},
-    closeMiniApp: true,
-  });
+  const opened = returnToTelegramChat(
+    "https://t.me/detailer_img_bot?start=billing",
+    {
+      telegram,
+      browserWindow: {},
+      location: {assign() {}},
+    },
+  );
 
   assert.equal(opened, true);
   assert.deepEqual(calls, [
-    ["open", "https://t.me/detailer_img_bot?start=billing"],
+    ["disable-confirmation"],
     ["close"],
   ]);
 });
 
-test("ordinary chat navigation keeps the Mini App open", () => {
-  let closed = false;
-  const telegram = {
-    openTelegramLink() {},
+test("close resolves the current WebApp instance from the browser", () => {
+  const calls = [];
+  const staleTelegram = {
     close() {
-      closed = true;
+      calls.push(["stale-close"]);
+    },
+  };
+  const currentTelegram = {
+    close() {
+      calls.push(["current-close"]);
     },
   };
 
-  openTelegramUrl("https://t.me/detailer_img_bot?start=open_app", {
-    telegram,
-    location: {assign() {}},
+  const closed = closeTelegramMiniApp({
+    telegram: staleTelegram,
+    browserWindow: {Telegram: {WebApp: currentTelegram}},
   });
 
-  assert.equal(closed, false);
+  assert.equal(closed, true);
+  assert.deepEqual(calls, [["current-close"]]);
+});
+
+test("browser fallback opens the bot URL", () => {
+  const assigned = [];
+
+  const opened = returnToTelegramChat(
+    "https://t.me/detailer_img_bot?start=open_app",
+    {
+      telegram: undefined,
+      browserWindow: {},
+      location: {
+        assign(url) {
+          assigned.push(url);
+        },
+      },
+    },
+  );
+
+  assert.equal(opened, true);
+  assert.deepEqual(assigned, [
+    "https://t.me/detailer_img_bot?start=open_app",
+  ]);
 });

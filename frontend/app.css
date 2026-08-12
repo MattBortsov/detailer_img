@@ -254,12 +254,19 @@ h3 {
 .accepted-chat {
   width: 100%;
   margin-block-start: var(--space-xl);
+  border-color: #fff;
   border-radius: 14px;
   padding: var(--space-md) var(--space-lg);
-  background: var(--color-accent);
-  color: #061014;
+  background: #fff;
+  color: #07080d;
   font-size: 16px;
   font-weight: 650;
+}
+
+.accepted-chat:hover,
+.accepted-chat:active {
+  border-color: #fff;
+  background: #fff;
 }
 
 .spinner {

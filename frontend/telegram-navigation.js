@@ -1,17 +1,29 @@
-export function openTelegramUrl(
+function currentWebApp(telegram, browserWindow) {
+  return browserWindow?.Telegram?.WebApp ?? telegram;
+}
+
+export function closeTelegramMiniApp({telegram, browserWindow}) {
+  const webApp = currentWebApp(telegram, browserWindow);
+  if (typeof webApp?.close !== "function") {
+    return false;
+  }
+
+  webApp.disableClosingConfirmation?.();
+  webApp.close();
+  return true;
+}
+
+export function returnToTelegramChat(
   url,
-  {telegram, location, closeMiniApp = false},
+  {telegram, browserWindow, location},
 ) {
+  if (closeTelegramMiniApp({telegram, browserWindow})) {
+    return true;
+  }
   if (!url) {
     return false;
   }
-  if (telegram?.openTelegramLink) {
-    telegram.openTelegramLink(url);
-    if (closeMiniApp) {
-      telegram.close?.();
-    }
-  } else {
-    location.assign(url);
-  }
+
+  location.assign(url);
   return true;
 }
