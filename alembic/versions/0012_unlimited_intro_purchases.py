@@ -14,7 +14,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.drop_constraint(
-        op.f("ck_billing_orders_intro_number_matches_product"),
+        op.f("ck_billing_orders_ck_billing_orders_intro_number_matche_16b3"),
         "billing_orders",
         type_="check",
     )
