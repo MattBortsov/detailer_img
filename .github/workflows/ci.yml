@@ -44,6 +44,9 @@ jobs:
       - name: Validate operations scripts
         run: bash -n ops/*.sh
 
+      - name: Test frontend behavior
+        run: npm test
+
       - name: Validate production Compose
         run: docker compose config --quiet
 

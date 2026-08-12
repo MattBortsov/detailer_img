@@ -16,6 +16,7 @@ import {
   setCatalogLoading,
   setFlipped,
 } from "./state.js";
+import {openTelegramUrl as navigateToTelegramUrl} from "./telegram-navigation.js";
 
 const HEX_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const BOT_URL_PATTERN =
@@ -374,6 +375,10 @@ function render() {
     "submission_limited",
     "allowance_required",
   ].includes(state.view);
+  elements.alert.classList.toggle(
+    "allowance-alert",
+    state.view === "allowance_required",
+  );
   elements.openBilling.hidden =
     state.view !== "allowance_required" || state.billingChatUrl === null;
   elements.alert.textContent =
@@ -394,14 +399,7 @@ function openChat() {
 }
 
 function openTelegramUrl(url) {
-  if (!url) {
-    return;
-  }
-  if (telegram?.openTelegramLink) {
-    telegram.openTelegramLink(url);
-  } else {
-    window.location.assign(url);
-  }
+  navigateToTelegramUrl(url, {telegram, location: window.location});
 }
 
 async function fetchJson(url, options = {}) {
@@ -988,7 +986,11 @@ for (const button of document.querySelectorAll("[data-open-chat]")) {
   button.addEventListener("click", openChat);
 }
 elements.openBilling.addEventListener("click", () => {
-  openTelegramUrl(trustedBotUrl(state.billingChatUrl));
+  navigateToTelegramUrl(trustedBotUrl(state.billingChatUrl), {
+    telegram,
+    location: window.location,
+    closeMiniApp: true,
+  });
 });
 elements.closeMiniApp.addEventListener("click", () => telegram?.close());
 
