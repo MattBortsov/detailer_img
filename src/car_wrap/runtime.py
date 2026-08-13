@@ -37,6 +37,7 @@ def build_application() -> FastAPI:
         max_active=settings.job_max_active_per_user,
         max_recent=settings.job_max_accepted_per_window,
         window_seconds=settings.job_limit_window_seconds,
+        allowance_exempt_user_ids=settings.admin_telegram_user_ids,
     )
     telegram_bot = Bot(token=settings.bot_token.get_secret_value())
     payment_service = PaymentService(sessions, PaymentGatewayClient(settings))

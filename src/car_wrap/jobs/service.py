@@ -42,6 +42,7 @@ class JobAcceptanceService:
         max_active: int,
         max_recent: int,
         window_seconds: int,
+        allowance_exempt_user_ids: tuple[int, ...] = (),
         clock: Callable[[], datetime] | None = None,
         allowances: AllowanceService | None = None,
     ) -> None:
@@ -52,6 +53,7 @@ class JobAcceptanceService:
         self._max_active = max_active
         self._max_recent = max_recent
         self._window_seconds = window_seconds
+        self._allowance_exempt_user_ids = frozenset(allowance_exempt_user_ids)
         self._clock = clock or (lambda: datetime.now(UTC))
         self._allowances = allowances or AllowanceService()
 
@@ -97,14 +99,15 @@ class JobAcceptanceService:
                 prompt_revision=self._prompt_revision,
                 now=now,
             )
-            try:
-                await self._allowances.reserve(
-                    session, user_id=user_id, job_id=job.id, now=now
-                )
-            except AllowanceUnavailable as error:
-                raise JobAcceptanceError(
-                    AcceptanceErrorCode.ALLOWANCE_REQUIRED
-                ) from error
+            if user_id not in self._allowance_exempt_user_ids:
+                try:
+                    await self._allowances.reserve(
+                        session, user_id=user_id, job_id=job.id, now=now
+                    )
+                except AllowanceUnavailable as error:
+                    raise JobAcceptanceError(
+                        AcceptanceErrorCode.ALLOWANCE_REQUIRED
+                    ) from error
             await session.commit()
             return AcceptedJob(job.id, JobStatus.QUEUED)
         except Exception:
