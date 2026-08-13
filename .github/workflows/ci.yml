@@ -48,7 +48,12 @@ jobs:
         run: npm test
 
       - name: Validate production Compose
-        run: docker compose config --quiet
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker compose config --quiet
+          docker compose config --format json |
+            python3 -c 'import json, sys; config = json.load(sys.stdin); networks = config["services"]["daily-stats"]["networks"]; assert "backend" in networks and "edge" in networks, "daily-stats requires database and Telegram egress networks"'
 
       - name: Build production image
         run: docker build --tag detailer-img:ci .

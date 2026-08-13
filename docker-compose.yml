@@ -246,6 +246,7 @@ services:
     environment: *app-environment
     networks:
       - backend
+      - edge
     depends_on:
       postgres:
         condition: service_healthy
