@@ -18,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-DEFAULT_OPENROUTER_IMAGE_MODEL = "x-ai/grok-imagine-image-quality"
+DEFAULT_OPENROUTER_IMAGE_MODEL = "x-ai/grok-imagine-image-2.0"
 DEFAULT_ADMIN_TELEGRAM_USER_IDS = (715709681,)
 _MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")
 _BOT_USERNAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{3,27}[Bb][Oo][Tt]$")

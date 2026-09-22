@@ -37,7 +37,7 @@ env -u OPENROUTER_API_KEY .venv/bin/python -m car_wrap.eval generate \
 ## 2. Run the paid candidate deliberately
 
 Set `OPENROUTER_API_KEY` in the invoking shell and optionally set
-`OPENROUTER_IMAGE_MODEL` (default: `x-ai/grok-imagine-image-quality`). Generated
+`OPENROUTER_IMAGE_MODEL` (default: `x-ai/grok-imagine-image-2.0`). Generated
 media may be written only to a real, non-symlink descendant of the project
 `eval/output/` directory. The versioned run artifact contains metadata only.
 
